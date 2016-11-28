@@ -22,12 +22,18 @@ from datasets import cifar10
 from datasets import flowers
 from datasets import imagenet
 from datasets import mnist
+from datasets import species
+from datasets import species_spilled
+from datasets import fish
 
 datasets_map = {
     'cifar10': cifar10,
     'flowers': flowers,
     'imagenet': imagenet,
     'mnist': mnist,
+    'species': species,
+    'species_spilled': species_spilled,
+    'fish': fish,
 }
 
 
