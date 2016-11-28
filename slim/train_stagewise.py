@@ -552,7 +552,15 @@ def main(_):
     update_ops.append(grad_updates)
 
     update_op = tf.group(*update_ops)
-    train_tensor = control_flow_ops.with_dependencies([update_op], tf.Print(total_loss),
+
+    print(list(map(lambda x: (x.op.name, x, tf.shape(x)), tf.get_collection(tf.GraphKeys.MODEL_VARIABLES, 'InceptionResnetV2/Logits'))))
+    print(list(map(lambda x: (x.op.name, x, tf.shape(x)),
+                   tf.get_collection(tf.GraphKeys.VARIABLES, 'InceptionResnetV2/Logits/Logits'))))
+    logit_weight, logit_bias = tf.get_collection(tf.GraphKeys.MODEL_VARIABLES, 'InceptionResnetV2/Logits')
+
+
+
+    train_tensor = control_flow_ops.with_dependencies([update_op, tf.assign(logit_weight, tf.zeros([2]), validate_shape=False), tf.assign(logit_bias, tf.zeros([2]), validate_shape=False)], tf.Print(total_loss, tf.get_collection(tf.GraphKeys.MODEL_VARIABLES, 'InceptionResnetV2/Logits')),
                                                       name='train_op')
 
     # Add the summaries from the first clone. These contain the summaries
@@ -579,6 +587,8 @@ def main(_):
         save_summaries_secs=FLAGS.save_summaries_secs,
         save_interval_secs=FLAGS.save_interval_secs,
         sync_optimizer=optimizer if FLAGS.sync_replicas else None)
+
+
 
 
 if __name__ == '__main__':
