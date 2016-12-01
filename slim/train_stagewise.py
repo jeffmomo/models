@@ -25,6 +25,7 @@ from datasets import dataset_factory
 from deployment import model_deploy
 from nets import nets_factory
 from preprocessing import preprocessing_factory
+from tensorflow.python.training.saver import BaseSaverBuilder
 
 slim = tf.contrib.slim
 
@@ -321,6 +322,127 @@ def _add_variables_summaries(learning_rate):
   return summaries
 
 
+class MyBuilder(BaseSaverBuilder):
+
+
+  def restore_op(self, filename_tensor, saveable, preferred_shard):
+    """Create ops to restore 'saveable'.
+
+    This is intended to be overridden by subclasses that want to generate
+    different Ops.
+
+    Args:
+      filename_tensor: String Tensor.
+      saveable: A BaseSaverBuilder.SaveableObject object.
+      preferred_shard: Int.  Shard to open first when loading a sharded file.
+
+    Returns:
+      A list of Tensors resulting from reading 'saveable' from
+        'filename'.
+    """
+    # pylint: disable=protected-access
+
+    from tensorflow.python.ops import io_ops
+
+    # print(filename_tensor, saveable.op, saveable.name)
+
+    tensors = []
+    for spec in saveable.specs:
+      print('name', spec.name)
+      lsw = ["InceptionResnetV2/Logits/Logits/weights", "InceptionResnetV2/AuxLogits/Logits/weights"]
+      lsb = ["InceptionResnetV2/AuxLogits/Logits/biases", "InceptionResnetV2/Logits/Logits/biases"]
+
+      if spec.name in lsb:
+        tensors.append(
+          tf.ones([2]))
+          # tf.zeros(tf.Print(tf.shape(io_ops._restore_slice(
+          #   filename_tensor,
+          #   spec.name,
+          #   spec.slice_spec,
+          #   spec.tensor.dtype,
+          #   preferred_shard=preferred_shard)), [tf.shape(io_ops._restore_slice(
+          #   filename_tensor,
+          #   spec.name,
+          #   spec.slice_spec,
+          #   spec.tensor.dtype,
+          #   preferred_shard=preferred_shard))])))
+      elif spec.name in lsw:
+        shap = tf.shape(io_ops._restore_slice(
+            filename_tensor,
+            spec.name,
+            spec.slice_spec,
+            spec.tensor.dtype,
+            preferred_shard=preferred_shard))
+        tensors.append(
+          tf.zeros([shap[0], 2]))
+        # tf.zeros(tf.Print(tf.shape(io_ops._restore_slice(
+        #   filename_tensor,
+        #   spec.name,
+        #   spec.slice_spec,
+        #   spec.tensor.dtype,
+        #   preferred_shard=preferred_shard)), [tf.shape(io_ops._restore_slice(
+        #   filename_tensor,
+        #   spec.name,
+        #   spec.slice_spec,
+        #   spec.tensor.dtype,
+        #   preferred_shard=preferred_shard))])))
+      else:
+        tensors.append(
+          io_ops._restore_slice(
+            filename_tensor,
+            spec.name,
+            spec.slice_spec,
+            spec.tensor.dtype,
+            preferred_shard=preferred_shard))
+
+    return tensors
+
+def assign_from_checkpoint_fn(model_path, var_list, ignore_missing_vars=False,
+                              reshape_variables=False):
+  """Returns a function that assigns specific variables from a checkpoint.
+
+  Args:
+    model_path: The full path to the model checkpoint. To get latest checkpoint
+        use `model_path = tf.train.latest_checkpoint(checkpoint_dir)`
+    var_list: A list of `Variable` objects or a dictionary mapping names in the
+        checkpoint to the correspoing variables to initialize. If empty or None,
+        it would return  no_op(), None.
+    ignore_missing_vars: Boolean, if True it would ignore variables missing in
+        the checkpoint with a warning instead of failing.
+    reshape_variables: Boolean, if True it would automatically reshape variables
+        which are of different shape then the ones stored in the checkpoint but
+        which have the same number of elements.
+
+  Returns:
+    A function that takes a single argument, a `tf.Session`, that applies the
+    assignment operation.
+
+  Raises:
+    ValueError: If the checkpoint specified at `model_path` is missing one of
+      the variables in `var_list`.
+  """
+
+  if ignore_missing_vars:
+    from tensorflow.python import pywrap_tensorflow
+    reader = pywrap_tensorflow.NewCheckpointReader(model_path)
+    if isinstance(var_list, dict):
+      var_dict = var_list
+    else:
+      var_dict = {var.op.name: var for var in var_list}
+    available_vars = {}
+    for var in var_dict:
+      if reader.has_tensor(var):
+        available_vars[var] = var_dict[var]
+      else:
+        tf.logging.warning(
+            'Variable %s missing in checkpoint %s', var, model_path)
+    var_list = available_vars
+  saver = tf.train.Saver(var_list, reshape=reshape_variables, builder=MyBuilder())
+  def callback(session):
+    print('ASDFASDFASDJFASDFASDFA')
+    saver.restore(session, model_path)
+  return callback
+
 def _get_init_fn():
   """Returns a function run by the chief worker to warm-start the training.
 
@@ -364,7 +486,7 @@ def _get_init_fn():
 
   tf.logging.info('Fine-tuning from %s' % checkpoint_path)
 
-  return slim.assign_from_checkpoint_fn(
+  return assign_from_checkpoint_fn(
       checkpoint_path,
       variables_to_restore,
       ignore_missing_vars=FLAGS.ignore_missing_vars)
@@ -465,6 +587,15 @@ def main(_):
       images, labels = batch_queue.dequeue()
       logits, end_points = network_fn(images)
 
+      # end_points['Logits'] = slim.fully_connected(end_points['PreLogitsFlatten'], 2, activation_fn=None, scope='Logits2')
+      # logits = end_points['Logits']
+      #
+      # aux = slim.fully_connected(end_points['PreAuxLogitsFlatten'], 2, activation_fn=None, scope='Logits2')
+      # end_points['AuxLogits'] = aux
+      #
+      #
+      # labels = tf.zeros([32,2])
+
       #############################
       # Specify the loss function #
       #############################
@@ -554,13 +685,11 @@ def main(_):
     update_op = tf.group(*update_ops)
 
     print(list(map(lambda x: (x.op.name, x, tf.shape(x)), tf.get_collection(tf.GraphKeys.MODEL_VARIABLES, 'InceptionResnetV2/Logits'))))
-    print(list(map(lambda x: (x.op.name, x, tf.shape(x)),
-                   tf.get_collection(tf.GraphKeys.VARIABLES, 'InceptionResnetV2/Logits/Logits'))))
+
     logit_weight, logit_bias = tf.get_collection(tf.GraphKeys.MODEL_VARIABLES, 'InceptionResnetV2/Logits')
 
 
-
-    train_tensor = control_flow_ops.with_dependencies([update_op, tf.assign(logit_weight, tf.zeros([2]), validate_shape=False), tf.assign(logit_bias, tf.zeros([2]), validate_shape=False)], tf.Print(total_loss, tf.get_collection(tf.GraphKeys.MODEL_VARIABLES, 'InceptionResnetV2/Logits')),
+    train_tensor = control_flow_ops.with_dependencies([update_op], tf.Print(total_loss, tf.get_collection(tf.GraphKeys.MODEL_VARIABLES, 'InceptionResnetV2/Logits')),
                                                       name='train_op')
 
     # Add the summaries from the first clone. These contain the summaries
@@ -570,6 +699,14 @@ def main(_):
 
     # Merge all summaries together.
     summary_op = tf.merge_summary(list(summaries), name='summary_op')
+
+
+    # def augmented_init_fn():
+    #     _get_init_fn()()
+    #     tf.assign(logit_weight, tf.zeros([2]), validate_shape=False)
+    #     tf.assign(logit_bias, tf.zeros([2]), validate_shape=False)
+
+
 
 
     ###########################

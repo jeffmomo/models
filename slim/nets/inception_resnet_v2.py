@@ -199,6 +199,7 @@ def inception_resnet_v2(inputs, num_classes=1001, is_training=True,
           aux = slim.conv2d(aux, 768, aux.get_shape()[1:3],
                             padding='VALID', scope='Conv2d_2a_5x5')
           aux = slim.flatten(aux)
+          end_points['PreAuxLogitsFlatten'] = aux
           aux = slim.fully_connected(aux, num_classes, activation_fn=None,
                                      scope='Logits')
           end_points['AuxLogits'] = aux
