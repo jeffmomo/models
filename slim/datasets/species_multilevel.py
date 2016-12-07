@@ -27,37 +27,72 @@ import tensorflow as tf
 
 from datasets import dataset_utils
 
+from hierarchy import get_hierarchy
+
 slim = tf.contrib.slim
 
 _FILE_PATTERN = '%s-*'
 
 SPLITS_TO_SIZES = {'train': 663832, 'validation': 168607}
 
-_NUM_CLASSES = 2062
 
 _ITEMS_TO_DESCRIPTIONS = {
     'image': 'A color image of varying size.',
     'label': 'A single integer between 0 and 4',
+    'original_label': 'The original label',
     'filename': 'File name of the image',
 }
 
-label_map = []
-translationmap_tensor = None
+tf.app.flags.DEFINE_integer('current_level', 0,
+                            'The current level to train on, with 0 being the root')
+
+current_level = tf.app.flags.FLAGS.current_level
+
+hierarchy_tree = get_hierarchy.generate_tree()
+hierarchy_tree.prune(threshold=100)
+
+assert len(hierarchy_tree.children()) == 2062, "Unexpected number of classes"
+
+def_lst, idx_map = hierarchy_tree.get_tree_index_mappings()
+
+_TOTAL_CLASSES = 2062
+_NUM_CLASSES = len(def_lst[current_level])
+
+labelmap_tensor = None
 
 def get_label_map():
 
-    if not len(label_map):
+    if labelmap_tensor is None:
 
+        label_map = []
         file = open('/home/dm116/Workspace/MultiLevelSoftmax/index_map.dat', 'r')
         for line in file:
             label_map.append(int(line[:-1]))
 
-        global translationmap_tensor
+        global labelmap_tensor
         labelmap_tensor = tf.convert_to_tensor(label_map, tf.int32)
         return labelmap_tensor
 
     return labelmap_tensor
 
+
+translationmap_tensor = None
+
+def get_translation_map():
+
+    global translationmap_tensor
+
+    if translationmap_tensor is None:
+        label_map = []
+
+        for i in range(0, _TOTAL_CLASSES):
+            label_map.append(get_hierarchy.translate_to_level(idx_map, current_level, i))
+
+
+        translationmap_tensor = tf.convert_to_tensor(label_map, tf.int32)
+        return translationmap_tensor
+
+    return translationmap_tensor
 
 
 embeddings_tensor = None
@@ -66,16 +101,8 @@ def get_embeddings_map():
     global embeddings_tensor
 
     if embeddings_tensor is None:
-        with open('/home/dm116/Workspace/MultiLevelSoftmax/spilled.dat', 'r') as f:
-            mapping = []
-            
-            for line in f:
-                mapping.append([float(x) for x in line[:-1].split(',')])
 
-            # To get rid of the background class
-            mapping.insert(0, mapping[0])
-
-            embeddings_tensor = tf.convert_to_tensor(mapping, tf.float32)
+        embeddings_tensor = tf.convert_to_tensor(idx_map, tf.float32)
 
         return embeddings_tensor
     else:
@@ -85,17 +112,22 @@ def get_embeddings_map():
 
 class ModdedTensor(slim.tfexample_decoder.Tensor):
 
-  def __init__(self, tensor_key, shape_keys=None, shape=None, default_value=0):
+  def __init__(self, tensor_key, shape_keys=None, shape=None, default_value=0, translate=True):
     super(ModdedTensor, self).__init__(tensor_key, shape_keys, shape, default_value)
 
     self.old_tensors_to_item = self.tensors_to_item
     self.tensors_to_item = self.new_tensors_to_item
 
+    self.translate = translate
+
 
   def new_tensors_to_item(self, keys_to_tensors):
-    # to avoid background class for resnet
-    out = tf.squeeze(tf.gather(get_label_map(), self.old_tensors_to_item(keys_to_tensors))) - 1
-    print(out)
+
+    if self.translate:
+      out = tf.gather(get_translation_map(), tf.squeeze(tf.gather(get_label_map(), self.old_tensors_to_item(keys_to_tensors))) - 1)
+    else:
+      out = tf.squeeze(tf.gather(get_label_map(), self.old_tensors_to_item(keys_to_tensors))) - 1
+
     return out
 
 
@@ -141,7 +173,8 @@ def get_split(split_name, dataset_dir, file_pattern=None, reader=None):
 
   items_to_handlers = {
       'image': slim.tfexample_decoder.Image(),
-      'label': ModdedTensor('image/class/label'),
+      'label': ModdedTensor('image/class/label', translate=True),
+      'original_label': ModdedTensor('image/class/label', translate=False),
       'filename': slim.tfexample_decoder.Tensor('image/filename'),
   }
 

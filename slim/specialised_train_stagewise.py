@@ -26,6 +26,7 @@ from deployment import model_deploy
 from nets import nets_factory
 from preprocessing import preprocessing_factory
 from tensorflow.python.training.saver import BaseSaverBuilder
+from tensorflow.contrib.layers import initializers
 
 from hierarchy import get_hierarchy
 
@@ -168,8 +169,7 @@ tf.app.flags.DEFINE_float(
 # Dataset Flags #
 #######################
 
-tf.app.flags.DEFINE_string(
-    'dataset_name', 'imagenet', 'The name of the dataset to load.')
+import datasets.species_multilevel_specialised as species_multilevel_specialised
 
 tf.app.flags.DEFINE_string(
     'dataset_split_name', 'train', 'The name of the train/test split.')
@@ -183,12 +183,7 @@ tf.app.flags.DEFINE_integer(
     'evaluate the VGG and ResNet architectures which do not use a background '
     'class for the ImageNet dataset.')
 
-tf.app.flags.DEFINE_string(
-    'model_name', 'inception_v3', 'The name of the architecture to train.')
-
-tf.app.flags.DEFINE_string(
-    'preprocessing_name', None, 'The name of the preprocessing to use. If left '
-    'as `None`, then the model_name flag is used.')
+import preprocessing.species_preprocessing as species_preprocessing
 
 tf.app.flags.DEFINE_integer(
     'batch_size', 32, 'The number of samples in each batch.')
@@ -243,19 +238,7 @@ hierarchy_tree.prune(threshold=100)
 def_lst, idx_map = hierarchy_tree.get_tree_index_mappings()
 
 
-translationmap_tensor = None
 
-def get_translation_map():
-
-    global translationmap_tensor
-
-    if translationmap_tensor is None:
-        translation_map = idx_map
-
-        translationmap_tensor = tf.convert_to_tensor(translation_map[FLAGS.current_level], tf.int32)
-        return translationmap_tensor
-
-    return translationmap_tensor
 
 
 def _configure_learning_rate(num_samples_per_epoch, global_step):
@@ -360,8 +343,14 @@ def _add_variables_summaries(learning_rate):
 
 class MyBuilder(BaseSaverBuilder):
 
-  def __init__(self, expand=False):
+  def __init__(self, level, expand=False):
     self.expand = expand
+    self.level = level
+
+    self.translationmap_tensors = []
+
+    for item in idx_map:
+      self.translationmap_tensors.append(tf.convert_to_tensor(item, tf.int32))
 
   def restore_op(self, filename_tensor, saveable, preferred_shard):
     """Create ops to restore 'saveable'.
@@ -382,19 +371,30 @@ class MyBuilder(BaseSaverBuilder):
 
     tensors = []
     for spec in saveable.specs:
-      print('name', spec.name)
 
-      if spec.name in lsb or spec.name in lsw:
+      if spec.name in lsw:
 
         to_append = tf.transpose(tf.gather(tf.transpose(io_ops._restore_slice(
             filename_tensor,
             spec.name,
             spec.slice_spec,
             spec.tensor.dtype,
-            preferred_shard=preferred_shard)), get_translation_map()))
+            preferred_shard=preferred_shard)), self.translationmap_tensors[self.level]))
 
+        to_append = to_append + initializers.xavier_initializer()(tf.shape(to_append))
 
-        tensors.append(tf.Print(to_append, [to_append]))
+        tensors.append(to_append)
+
+      elif spec.name in lsb:
+
+        to_append = tf.transpose(tf.gather(tf.transpose(io_ops._restore_slice(
+          filename_tensor,
+          spec.name,
+          spec.slice_spec,
+          spec.tensor.dtype,
+          preferred_shard=preferred_shard)), self.translationmap_tensors[self.level]))
+
+        tensors.append(to_append)
 
       else:
         tensors.append(
@@ -408,7 +408,7 @@ class MyBuilder(BaseSaverBuilder):
     return tensors
 
 def assign_from_checkpoint_fn(model_path, var_list, ignore_missing_vars=False,
-                              reshape_variables=False, expand_logits=False):
+                              reshape_variables=False, expand_logits=False, level=0):
   """Returns a function that assigns specific variables from a checkpoint.
 
   Args:
@@ -447,12 +447,12 @@ def assign_from_checkpoint_fn(model_path, var_list, ignore_missing_vars=False,
         tf.logging.warning(
             'Variable %s missing in checkpoint %s', var, model_path)
     var_list = available_vars
-  saver = tf.train.Saver(var_list, reshape=reshape_variables, builder=MyBuilder(expand_logits))
+  saver = tf.train.Saver(var_list, reshape=reshape_variables, builder=MyBuilder(level, expand_logits))
   def callback(session):
     saver.restore(session, model_path)
   return callback
 
-def _get_init_fn():
+def _get_init_fn(level, checkpoint_path, expand):
   """Returns a function run by the chief worker to warm-start the training.
 
   Note that the init_fn is only run when initializing the model during the very
@@ -488,10 +488,7 @@ def _get_init_fn():
     if not excluded:
       variables_to_restore.append(var)
 
-  if tf.gfile.IsDirectory(FLAGS.checkpoint_path):
-    checkpoint_path = tf.train.latest_checkpoint(FLAGS.checkpoint_path)
-  else:
-    checkpoint_path = FLAGS.checkpoint_path
+
 
   tf.logging.info('Fine-tuning from %s' % checkpoint_path)
 
@@ -501,7 +498,8 @@ def _get_init_fn():
       checkpoint_path,
       variables_to_restore,
       ignore_missing_vars=FLAGS.ignore_missing_vars,
-      expand_logits=FLAGS.expand_logits)
+      expand_logits=expand,
+      level=level)
 
 
 def _get_variables_to_train():
@@ -522,12 +520,36 @@ def _get_variables_to_train():
   return variables_to_train
 
 
-def main(_):
+
+
+
+
+
+
+
+def one_train_cycle(current_level, checkpoint_path, expand_logits):
   if not FLAGS.dataset_dir:
     raise ValueError('You must supply the dataset directory with --dataset_dir')
 
+
+  # translationmap_tensors = None
+  # def get_translation_map():
+  #
+  #   global translationmap_tensors
+  #
+  #   if translationmap_tensors is None:
+  #     print(idx_map)
+  #     translationmap_tensors = []
+  #
+  #     for item in idx_map:
+  #       translationmap_tensors.append(tf.convert_to_tensor(item, tf.int32))
+  #
+  #   return translationmap_tensors
+
+
   tf.logging.set_verbosity(tf.logging.INFO)
   with tf.Graph().as_default():
+
     ######################
     # Config model_deploy#
     ######################
@@ -545,14 +567,13 @@ def main(_):
     ######################
     # Select the dataset #
     ######################
-    dataset = dataset_factory.get_dataset(
-        FLAGS.dataset_name, FLAGS.dataset_split_name, FLAGS.dataset_dir)
+    dataset = species_multilevel_specialised.SpeciesDataset(current_level).get_split(FLAGS.dataset_split_name, FLAGS.dataset_dir)
 
     ####################
     # Select the network #
     ####################
     network_fn = nets_factory.get_network_fn(
-        FLAGS.model_name,
+        "inception_resnet_v2",
         num_classes=(dataset.num_classes - FLAGS.labels_offset),
         weight_decay=FLAGS.weight_decay,
         is_training=True)
@@ -560,10 +581,7 @@ def main(_):
     #####################################
     # Select the preprocessing function #
     #####################################
-    preprocessing_name = FLAGS.preprocessing_name or FLAGS.model_name
-    image_preprocessing_fn = preprocessing_factory.get_preprocessing(
-        preprocessing_name,
-        is_training=True)
+    image_preprocessing_fn = species_preprocessing.preprocess_image
 
     ##############################################################
     # Create a dataset provider that loads data from the dataset #
@@ -579,7 +597,7 @@ def main(_):
 
       train_image_size = FLAGS.train_image_size or network_fn.default_image_size
 
-      image = image_preprocessing_fn(image, train_image_size, train_image_size)
+      image = image_preprocessing_fn(image, train_image_size, train_image_size, is_training=True)
 
       images, labels = tf.train.batch(
           [image, label],
@@ -703,30 +721,86 @@ def main(_):
     # Merge all summaries together.
     summary_op = tf.merge_summary(list(summaries), name='summary_op')
 
-
-    # def augmented_init_fn():
-    #     _get_init_fn()()
-    #     tf.assign(logit_weight, tf.zeros([2]), validate_shape=False)
-    #     tf.assign(logit_bias, tf.zeros([2]), validate_shape=False)
-
-
-
-
     ###########################
     # Kicks off the training. #
     ###########################
+
+    saver = tf.train.Saver()
+    saver.old_save = saver.save
+    save_path = None
+    def new_save(*args, **kwargs):
+      nonlocal save_path
+
+      save_path = saver.old_save(*args, **kwargs)
+
+    saver.save = new_save
+
     slim.learning.train(
         train_tensor,
         logdir=FLAGS.train_dir,
         master=FLAGS.master,
         is_chief=(FLAGS.task == 0),
-        init_fn=_get_init_fn(),
+        init_fn=_get_init_fn(current_level, checkpoint_path, expand_logits),
         summary_op=summary_op,
         number_of_steps=FLAGS.max_number_of_steps,
         log_every_n_steps=FLAGS.log_every_n_steps,
         save_summaries_secs=FLAGS.save_summaries_secs,
         save_interval_secs=FLAGS.save_interval_secs,
+        saver=saver,
         sync_optimizer=optimizer if FLAGS.sync_replicas else None)
+
+    print("doneee")
+    print('saved at', save_path)
+
+    return save_path
+
+def run_basic_schedule(checkpoint_path, from_level, to_level, max_steps_per_level=10000):
+  initial_train_dir = FLAGS.train_dir
+
+  FLAGS.train_dir = initial_train_dir + from_level
+  FLAGS.max_number_of_steps = max_steps_per_level
+
+
+  checkpoint_path = one_train_cycle(from_level, checkpoint_path, False)
+
+  for i in range(from_level + 1, to_level + 1):
+    FLAGS.train_dir = initial_train_dir + i
+    checkpoint_path = one_train_cycle(i, checkpoint_path, True)
+
+def run_species_schedule(checkpoint_path):
+  initial_train_dir = FLAGS.train_dir
+
+  FLAGS.max_number_of_steps = 1000
+  FLAGS.train_dir = initial_train_dir + '3'
+  checkpoint_path = one_train_cycle(3, checkpoint_path, False)
+
+  FLAGS.max_number_of_steps = 1500
+  FLAGS.train_dir = initial_train_dir + '4'
+  checkpoint_path = one_train_cycle(4, checkpoint_path, True)
+
+  FLAGS.max_number_of_steps = 2000
+  FLAGS.train_dir = initial_train_dir + '5'
+  checkpoint_path = one_train_cycle(5, checkpoint_path, True)
+
+  FLAGS.max_number_of_steps = 3000
+  FLAGS.train_dir = initial_train_dir + '6'
+  checkpoint_path = one_train_cycle(6, checkpoint_path, True)
+
+def main(_):
+
+  if tf.gfile.IsDirectory(FLAGS.checkpoint_path):
+    checkpoint_path = tf.train.latest_checkpoint(FLAGS.checkpoint_path)
+  else:
+    checkpoint_path = FLAGS.checkpoint_path
+
+  run_species_schedule(checkpoint_path)
+
+  # initial_train_dir = FLAGS.train_dir
+  #
+  # FLAGS.train_dir = initial_train_dir + '0'
+  # checkpoint_path = one_train_cycle(0, checkpoint_path, False)
+  # FLAGS.train_dir = initial_train_dir + '1'
+  # one_train_cycle(1, checkpoint_path, True)
 
 
 

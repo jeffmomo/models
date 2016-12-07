@@ -42,7 +42,7 @@ _ITEMS_TO_DESCRIPTIONS = {
 }
 
 label_map = []
-labelmap_tensor = None
+translationmap_tensor = None
 
 def get_label_map():
 
@@ -52,7 +52,7 @@ def get_label_map():
         for line in file:
             label_map.append(int(line[:-1]))
 
-        global labelmap_tensor
+        global translationmap_tensor
         labelmap_tensor = tf.convert_to_tensor(label_map, tf.int32)
         return labelmap_tensor
 

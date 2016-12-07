@@ -25,6 +25,7 @@ from datasets import mnist
 from datasets import species
 from datasets import species_spilled
 from datasets import fish
+from datasets import species_multilevel
 
 datasets_map = {
     'cifar10': cifar10,
@@ -34,6 +35,7 @@ datasets_map = {
     'species': species,
     'species_spilled': species_spilled,
     'fish': fish,
+    'species_multilevel': species_multilevel,
 }
 
 

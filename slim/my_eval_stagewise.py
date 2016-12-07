@@ -14,9 +14,9 @@
 # ==============================================================================
 """Generic evaluation script that evaluates a model using a given dataset."""
 
-
-
-
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import math
 import tensorflow as tf
@@ -25,62 +25,34 @@ from datasets import dataset_factory
 from nets import nets_factory
 from preprocessing import preprocessing_factory
 
+import eval_image_classifier
+
+from hierarchy import get_hierarchy
+
 slim = tf.contrib.slim
-
-tf.app.flags.DEFINE_integer(
-    'batch_size', 100, 'The number of samples in each batch.')
-
-tf.app.flags.DEFINE_integer(
-    'max_num_batches', None,
-    'Max number of batches to evaluate by default use all.')
-
-tf.app.flags.DEFINE_string(
-    'master', '', 'The address of the TensorFlow master to use.')
-
-tf.app.flags.DEFINE_string(
-    'checkpoint_path', '/tmp/tfmodel/',
-    'The directory where the model was written to or an absolute path to a '
-    'checkpoint file.')
-
-tf.app.flags.DEFINE_string(
-    'eval_dir', '/tmp/tfmodel/', 'Directory where the results are saved to.')
-
-tf.app.flags.DEFINE_integer(
-    'num_preprocessing_threads', 4,
-    'The number of threads used to create the batches.')
-
-tf.app.flags.DEFINE_string(
-    'dataset_name', 'imagenet', 'The name of the dataset to load.')
-
-tf.app.flags.DEFINE_string(
-    'dataset_split_name', 'test', 'The name of the train/test split.')
-
-tf.app.flags.DEFINE_string(
-    'dataset_dir', None, 'The directory where the dataset files are stored.')
-
-tf.app.flags.DEFINE_integer(
-    'labels_offset', 0,
-    'An offset for the labels in the dataset. This flag is primarily used to '
-    'evaluate the VGG and ResNet architectures which do not use a background '
-    'class for the ImageNet dataset.')
-
-tf.app.flags.DEFINE_string(
-    'model_name', 'inception_v3', 'The name of the architecture to evaluate.')
-
-tf.app.flags.DEFINE_string(
-    'preprocessing_name', None, 'The name of the preprocessing to use. If left '
-    'as `None`, then the model_name flag is used.')
-
-tf.app.flags.DEFINE_float(
-    'moving_average_decay', None,
-    'The decay to use for the moving average.'
-    'If left as None, then moving averages are not used.')
-
-tf.app.flags.DEFINE_integer(
-    'eval_image_size', None, 'Eval image size')
 
 FLAGS = tf.app.flags.FLAGS
 
+hierarchy_tree = get_hierarchy.generate_tree()
+hierarchy_tree.prune(threshold=100)
+
+defs_lsts, idx_map = hierarchy_tree.get_tree_index_mappings()
+definitions_list = defs_lsts[FLAGS.current_level]
+num_classes = len(definitions_list)
+
+translationmap_tensor = None
+
+def get_translation_map():
+
+    global translationmap_tensor
+
+    if translationmap_tensor is None:
+        translation_map = idx_map
+
+        translationmap_tensor = tf.convert_to_tensor(translation_map[FLAGS.current_level], tf.int32)
+        return translationmap_tensor
+
+    return translationmap_tensor
 
 def main(_):
   if not FLAGS.dataset_dir:
@@ -112,7 +84,7 @@ def main(_):
         shuffle=False,
         common_queue_capacity=2 * FLAGS.batch_size,
         common_queue_min=FLAGS.batch_size)
-    [image, label] = provider.get(['image', 'label'])
+    [image, label, filename, orig_label] = provider.get(['image', 'label', 'filename', 'original_label'])
     label -= FLAGS.labels_offset
 
     #####################################
@@ -127,8 +99,8 @@ def main(_):
 
     image = image_preprocessing_fn(image, eval_image_size, eval_image_size)
 
-    images, labels = tf.train.batch(
-        [image, label],
+    images, labels, filenames, original_labels = tf.train.batch(
+        [image, label, filename, orig_label],
         batch_size=FLAGS.batch_size,
         num_threads=FLAGS.num_preprocessing_threads,
         capacity=5 * FLAGS.batch_size)
@@ -150,19 +122,39 @@ def main(_):
     predictions = tf.argmax(logits, 1)
     labels = tf.squeeze(labels)
 
-    # Define the metrics:
-    names_to_values, names_to_updates = slim.metrics.aggregate_metric_map({
-        'Accuracy': slim.metrics.streaming_accuracy(predictions, labels),
-        'Recall@5': slim.metrics.streaming_recall_at_k(
-            logits, labels, 5),
-    })
+    # # Define the metrics:
+    # names_to_values, names_to_updates = slim.metrics.aggregate_metric_map({
+    #     'Accuracy': slim.metrics.streaming_accuracy(predictions, labels),
+    #     'Recall@5': slim.metrics.streaming_recall_at_k(
+    #         logits, labels, 5),
+    # })
+    def write_out(maxes_out, labels_out, filenames_out, orig_labels_out):
+      for idx in range(0, len(maxes_out)):
+        # print(len(logits_out[idx]))
 
-    # Print the summaries to screen.
-    for name, value in names_to_values.items():
-      summary_name = 'eval/%s' % name
-      op = tf.scalar_summary(summary_name, value, collections=[])
-      op = tf.Print(op, [value], summary_name)
-      tf.add_to_collection(tf.GraphKeys.SUMMARIES, op)
+        assert labels_out[idx] >= 0 and labels_out[idx] < 2062, 'bad index..'
+
+        print(maxes_out[idx], labels_out[idx], orig_labels_out[idx])
+
+        print("classified:", definitions_list[maxes_out[idx]], "ident:", definitions_list[labels_out[idx]], "original ident:", defs_lsts[-1][orig_labels_out[idx]])
+
+        # do some stuff to add back the background class expected by my processing functions
+        # print(">", ','.join(['-9.99999'] + ['%.5f' % num for num in logits_out[idx]]))
+        # print(">ident", (labels_out[idx] + 1), filenames_out[idx])
+
+      return maxes_out, labels_out, filenames_out, orig_labels_out
+
+    eval_op = [tf.nn.in_top_k(logits, labels, 1), tf.nn.in_top_k(logits, labels, 5), tf.py_func(write_out, [predictions, labels, filenames, original_labels], [tf.int64, tf.int32, tf.string, tf.int32])]
+
+    final_op = [tf.identity(logits), tf.identity(labels), tf.identity(filenames)]
+
+    # # Print the summaries to screen.
+    # for name, value in names_to_values.iteritems():
+    #   print(name, value)
+    #   summary_name = 'eval/%s' % name
+    #   op = tf.scalar_summary(summary_name, value, collections=[])
+    #   op = tf.Print(op, [value], summary_name)
+    #   tf.add_to_collection(tf.GraphKeys.SUMMARIES, op)
 
     # TODO(sguada) use num_epochs=1
     if FLAGS.max_num_batches:
@@ -183,8 +175,16 @@ def main(_):
         checkpoint_path=checkpoint_path,
         logdir=FLAGS.eval_dir,
         num_evals=num_batches,
-        eval_op=list(names_to_updates.values()),
+        eval_op=eval_op,
+        # final_op=final_op,
         variables_to_restore=variables_to_restore)
+
+    # print(logits_out)
+    # for idx in xrange(0, len(logits_out)):
+    #   print(len(logits_out[idx]))
+    #   # do some stuff to add back the background class expected by my processing functions
+    #   print(">", ','.join(['-99.99999'] + ['%.5f' % num for num in logits_out[idx]]))
+    #   print(">ident", (labels_out[idx] + 1), filenames_out[idx])
 
 
 if __name__ == '__main__':
