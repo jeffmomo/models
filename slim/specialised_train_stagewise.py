@@ -369,41 +369,34 @@ class MyBuilder(BaseSaverBuilder):
     lsw = ["InceptionResnetV2/Logits/Logits/weights", "InceptionResnetV2/AuxLogits/Logits/weights"] if self.expand else []
     lsb = ["InceptionResnetV2/AuxLogits/Logits/biases", "InceptionResnetV2/Logits/Logits/biases"] if self.expand else []
 
+
+
     tensors = []
     for spec in saveable.specs:
 
-      if spec.name in lsw:
-
-        to_append = tf.transpose(tf.gather(tf.transpose(io_ops._restore_slice(
+      restored = io_ops._restore_slice(
             filename_tensor,
             spec.name,
             spec.slice_spec,
             spec.tensor.dtype,
-            preferred_shard=preferred_shard)), self.translationmap_tensors[self.level]))
+            preferred_shard=preferred_shard)
 
-        to_append = to_append + initializers.xavier_initializer()(tf.shape(to_append))
+      if spec.name in lsw:
+
+        to_append = tf.transpose(tf.gather(tf.transpose(restored), self.translationmap_tensors[self.level]))
+        print(to_append, to_append.get_shape())
+        to_append = to_append + tf.random_uniform(tf.shape(to_append), minval=-0.005, maxval=0.005) #(initializers.xavier_initializer()([int(spec.slice_spec.split(' ')[0]), len(idx_map[self.level])]) / 3)
+        # todo: Explore the effects of randomness, and what variance I should use.
 
         tensors.append(to_append)
 
       elif spec.name in lsb:
 
-        to_append = tf.transpose(tf.gather(tf.transpose(io_ops._restore_slice(
-          filename_tensor,
-          spec.name,
-          spec.slice_spec,
-          spec.tensor.dtype,
-          preferred_shard=preferred_shard)), self.translationmap_tensors[self.level]))
-
+        to_append = tf.transpose(tf.gather(tf.transpose(restored), self.translationmap_tensors[self.level]))
         tensors.append(to_append)
 
       else:
-        tensors.append(
-          io_ops._restore_slice(
-            filename_tensor,
-            spec.name,
-            spec.slice_spec,
-            spec.tensor.dtype,
-            preferred_shard=preferred_shard))
+        tensors.append(restored)
 
     return tensors
 
@@ -452,7 +445,7 @@ def assign_from_checkpoint_fn(model_path, var_list, ignore_missing_vars=False,
     saver.restore(session, model_path)
   return callback
 
-def _get_init_fn(level, checkpoint_path, expand):
+def _get_init_fn(level, checkpoint_path, expand, restore_logits):
   """Returns a function run by the chief worker to warm-start the training.
 
   Note that the init_fn is only run when initializing the model during the very
@@ -473,9 +466,9 @@ def _get_init_fn(level, checkpoint_path, expand):
     return None
 
   exclusions = []
-  if FLAGS.checkpoint_exclude_scopes:
+  if not restore_logits:
     exclusions = [scope.strip()
-                  for scope in FLAGS.checkpoint_exclude_scopes.split(',')]
+                  for scope in 'InceptionResnetV2/AuxLogits/Logits,InceptionResnetV2/Logits'.split(',')]
 
   # TODO(sguada) variables.filter_variables()
   variables_to_restore = []
@@ -527,7 +520,7 @@ def _get_variables_to_train():
 
 
 
-def one_train_cycle(current_level, checkpoint_path, expand_logits):
+def one_train_cycle(current_level, checkpoint_path, expand_logits, restore_logits=True):
   if not FLAGS.dataset_dir:
     raise ValueError('You must supply the dataset directory with --dataset_dir')
 
@@ -707,7 +700,6 @@ def one_train_cycle(current_level, checkpoint_path, expand_logits):
 
     print(list(map(lambda x: (x.op.name, x, tf.shape(x)), tf.get_collection(tf.GraphKeys.MODEL_VARIABLES, 'InceptionResnetV2/Logits'))))
 
-    logit_weight, logit_bias = tf.get_collection(tf.GraphKeys.MODEL_VARIABLES, 'InceptionResnetV2/Logits')
 
 
     train_tensor = control_flow_ops.with_dependencies([update_op], tf.Print(total_loss, tf.get_collection(tf.GraphKeys.MODEL_VARIABLES, 'InceptionResnetV2/Logits')),
@@ -740,7 +732,7 @@ def one_train_cycle(current_level, checkpoint_path, expand_logits):
         logdir=FLAGS.train_dir,
         master=FLAGS.master,
         is_chief=(FLAGS.task == 0),
-        init_fn=_get_init_fn(current_level, checkpoint_path, expand_logits),
+        init_fn=_get_init_fn(current_level, checkpoint_path, expand_logits, restore_logits),
         summary_op=summary_op,
         number_of_steps=FLAGS.max_number_of_steps,
         log_every_n_steps=FLAGS.log_every_n_steps,
@@ -757,14 +749,14 @@ def one_train_cycle(current_level, checkpoint_path, expand_logits):
 def run_basic_schedule(checkpoint_path, from_level, to_level, max_steps_per_level=10000):
   initial_train_dir = FLAGS.train_dir
 
-  FLAGS.train_dir = initial_train_dir + from_level
+  FLAGS.train_dir = initial_train_dir + str(from_level)
   FLAGS.max_number_of_steps = max_steps_per_level
 
 
-  checkpoint_path = one_train_cycle(from_level, checkpoint_path, False)
+  checkpoint_path = one_train_cycle(from_level, checkpoint_path, False, False)
 
   for i in range(from_level + 1, to_level + 1):
-    FLAGS.train_dir = initial_train_dir + i
+    FLAGS.train_dir = initial_train_dir + str(i)
     checkpoint_path = one_train_cycle(i, checkpoint_path, True)
 
 def run_species_schedule(checkpoint_path):
@@ -772,7 +764,7 @@ def run_species_schedule(checkpoint_path):
 
   FLAGS.max_number_of_steps = 1000
   FLAGS.train_dir = initial_train_dir + '3'
-  checkpoint_path = one_train_cycle(3, checkpoint_path, False)
+  checkpoint_path = one_train_cycle(3, checkpoint_path, False, False)
 
   FLAGS.max_number_of_steps = 1500
   FLAGS.train_dir = initial_train_dir + '4'
@@ -782,7 +774,7 @@ def run_species_schedule(checkpoint_path):
   FLAGS.train_dir = initial_train_dir + '5'
   checkpoint_path = one_train_cycle(5, checkpoint_path, True)
 
-  FLAGS.max_number_of_steps = 3000
+  FLAGS.max_number_of_steps = 7500
   FLAGS.train_dir = initial_train_dir + '6'
   checkpoint_path = one_train_cycle(6, checkpoint_path, True)
 
@@ -794,7 +786,7 @@ def main(_):
     checkpoint_path = FLAGS.checkpoint_path
 
   run_species_schedule(checkpoint_path)
-
+  # run_basic_schedule(checkpoint_path, 3, 6, 10)
   # initial_train_dir = FLAGS.train_dir
   #
   # FLAGS.train_dir = initial_train_dir + '0'
