@@ -26,6 +26,7 @@ from datasets import species
 from datasets import species_spilled
 from datasets import fish
 from datasets import species_multilevel
+from datasets import stinkbug
 
 datasets_map = {
     'cifar10': cifar10,
@@ -36,6 +37,7 @@ datasets_map = {
     'species_spilled': species_spilled,
     'fish': fish,
     'species_multilevel': species_multilevel,
+    'stinkbug': stinkbug
 }
 
 

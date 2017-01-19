@@ -155,7 +155,7 @@ def distorted_bounding_box_crop(image,
 
 def preprocess_for_train(image, height, width, bbox,
                          fast_mode=True,
-                         scope=None):
+                         scope=None, is_main=True):
   """Distort one image for training a network.
 
   Distorting images provides a useful technique for augmenting the data
@@ -192,7 +192,7 @@ def preprocess_for_train(image, height, width, bbox,
     # the coordinates are ordered [ymin, xmin, ymax, xmax].
     image_with_box = tf.image.draw_bounding_boxes(tf.expand_dims(image, 0),
                                                   bbox)
-    tf.image_summary('image_with_bounding_boxes', image_with_box)
+    tf.image_summary('image_with_bounding_boxes' if is_main else 'image_with_bounding_boxes_side', image_with_box)
 
     distorted_image, distorted_bbox = distorted_bounding_box_crop(image, bbox)
     # Restore the shape since the dynamic slice based upon the bbox_size loses
@@ -200,7 +200,7 @@ def preprocess_for_train(image, height, width, bbox,
     distorted_image.set_shape([None, None, 3])
     image_with_distorted_box = tf.image.draw_bounding_boxes(
         tf.expand_dims(image, 0), distorted_bbox)
-    tf.image_summary('images_with_distorted_bounding_box',
+    tf.image_summary('images_with_distorted_bounding_box' if is_main else 'images_with_distorted_bounding_box_side',
                      image_with_distorted_box)
 
     # This resizing operation may distort the images because the aspect
@@ -215,7 +215,7 @@ def preprocess_for_train(image, height, width, bbox,
         lambda x, method: tf.image.resize_images(x, [height, width], method=method),
         num_cases=num_resize_cases)
 
-    tf.image_summary('cropped_resized_image',
+    tf.image_summary('cropped_resized_image' if is_main else 'cropped_resized_image_side',
                      tf.expand_dims(distorted_image, 0))
 
     # Randomly flip the image horizontally.
@@ -227,7 +227,8 @@ def preprocess_for_train(image, height, width, bbox,
         lambda x, ordering: distort_color(x, ordering, fast_mode),
         num_cases=4)
 
-    tf.image_summary('final_distorted_image',
+
+    tf.image_summary('final_distorted_image' if is_main else 'final_distorted_image_side',
                      tf.expand_dims(distorted_image, 0))
     distorted_image = tf.sub(distorted_image, 0.5)
     distorted_image = tf.mul(distorted_image, 2.0)
@@ -235,7 +236,7 @@ def preprocess_for_train(image, height, width, bbox,
 
 
 def preprocess_for_eval(image, height, width,
-                        central_fraction=0.875, scope=None):
+                        central_fraction=0.875, scope=None, is_main=True):
   """Prepare one image for evaluation.
 
   If height and width are specified it would output an image with that size by
@@ -274,11 +275,10 @@ def preprocess_for_eval(image, height, width,
     image = tf.mul(image, 2.0)
     return image
 
-
 def preprocess_image(image, height, width,
                      is_training=False,
                      bbox=None,
-                     fast_mode=True):
+                     fast_mode=True, is_main=True):
   """Pre-process one image for training or evaluation.
 
   Args:
@@ -299,6 +299,6 @@ def preprocess_image(image, height, width,
     ValueError: if user does not provide bounding box
   """
   if is_training:
-    return preprocess_for_train(image, height, width, bbox, fast_mode)
+    return preprocess_for_train(image, height, width, bbox, fast_mode, is_main=is_main)
   else:
-    return preprocess_for_eval(image, height, width)
+    return preprocess_for_eval(image, height, width, is_main=is_main)

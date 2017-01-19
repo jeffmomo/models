@@ -14,9 +14,9 @@
 # ==============================================================================
 """Generic evaluation script that evaluates a model using a given dataset."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
+
+
 
 import math
 import tensorflow as tf
@@ -107,13 +107,13 @@ def main(_):
     #         logits, labels, 5),
     # })
     def write_out(logits_out, labels_out, filenames_out):
-      for idx in xrange(0, len(logits_out)):
+      for idx in range(0, len(logits_out)):
         # print(len(logits_out[idx]))
 
         assert labels_out[idx] >= 0 and labels_out[idx] <= 2062, 'bad index..'
         # do some stuff to add back the background class expected by my processing functions
         print(">", ','.join(['-9.99999'] + ['%.5f' % num for num in logits_out[idx]]))
-        print(">ident", (labels_out[idx] + 1), filenames_out[idx])
+        print(">ident", (labels_out[idx] + 1), str(filenames_out[idx], 'utf-8'))
 
       return logits_out, labels_out, filenames_out
 

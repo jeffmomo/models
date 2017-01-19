@@ -33,4 +33,6 @@ from nets.inception_v3 import inception_v3_base
 from nets.inception_v4 import inception_v4
 from nets.inception_v4 import inception_v4_arg_scope
 from nets.inception_v4 import inception_v4_base
+from nets.inception_resnet_v2_multiview import  inception_resnet_v2_multiview
+from nets.inception_resnet_v2_multiview import inception_resnet_v2_multiview_arg_scope
 # pylint: enable=unused-import

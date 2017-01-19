@@ -132,6 +132,8 @@ def _convert_dataset(split_name, filenames, class_names_to_ids, dataset_dir):
                 i+1, len(filenames), shard_id))
             sys.stdout.flush()
 
+            print('reading: ', filenames[i])
+
             # Read the filename:
             image_data = tf.gfile.FastGFile(filenames[i], 'r').read()
             height, width = image_reader.read_image_dims(sess, image_data)
@@ -140,7 +142,7 @@ def _convert_dataset(split_name, filenames, class_names_to_ids, dataset_dir):
             class_id = class_names_to_ids[class_name]
 
             example = dataset_utils.image_to_tfexample_with_filenames(
-                image_data, 'jpg', height, width, class_id, filenames[i])
+                image_data, bytes('jpg', encoding='utf-8'), height, width, class_id, bytes(filenames[i], 'utf-8'))
             tfrecord_writer.write(example.SerializeToString())
 
   sys.stdout.write('\n')

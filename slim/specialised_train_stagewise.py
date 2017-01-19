@@ -27,6 +27,7 @@ from nets import nets_factory
 from preprocessing import preprocessing_factory
 from tensorflow.python.training.saver import BaseSaverBuilder
 from tensorflow.contrib.layers import initializers
+from tensorflow.core.protobuf import saver_pb2
 
 from hierarchy import get_hierarchy
 
@@ -227,7 +228,8 @@ tf.app.flags.DEFINE_boolean(
     'expand_logits', False,
     'Expands the logits layer according to our current level (Flag is specified in species_multilevel.py)')
 
-
+tf.app.flags.DEFINE_string('schedule', 'default_schedule',
+                           'The training schedule to use - i.e. when to switch training levels')
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -344,6 +346,8 @@ def _add_variables_summaries(learning_rate):
 class MyBuilder(BaseSaverBuilder):
 
   def __init__(self, level, expand=False):
+    super(MyBuilder, self).__init__()
+
     self.expand = expand
     self.level = level
 
@@ -385,7 +389,7 @@ class MyBuilder(BaseSaverBuilder):
 
         to_append = tf.transpose(tf.gather(tf.transpose(restored), self.translationmap_tensors[self.level]))
         print(to_append, to_append.get_shape())
-        to_append = to_append + tf.random_uniform(tf.shape(to_append), minval=-0.005, maxval=0.005) #(initializers.xavier_initializer()([int(spec.slice_spec.split(' ')[0]), len(idx_map[self.level])]) / 3)
+        to_append = to_append + tf.random_uniform(tf.shape(to_append), minval=-0.001, maxval=0.001) #(initializers.xavier_initializer()([int(spec.slice_spec.split(' ')[0]), len(idx_map[self.level])]) / 3)
         # todo: Explore the effects of randomness, and what variance I should use.
 
         tensors.append(to_append)
@@ -454,7 +458,7 @@ def _get_init_fn(level, checkpoint_path, expand, restore_logits):
   Returns:
     An init function run by the supervisor.
   """
-  if FLAGS.checkpoint_path is None:
+  if checkpoint_path is None:
     return None
 
   # Warn the user if a checkpoint exists in the train_dir. Then we'll be
@@ -746,7 +750,9 @@ def one_train_cycle(current_level, checkpoint_path, expand_logits, restore_logit
 
     return save_path
 
-def run_basic_schedule(checkpoint_path, from_level, to_level, max_steps_per_level=10000):
+
+
+def basic_schedule(checkpoint_path, from_level=3, to_level=6, max_steps_per_level=10000):
   initial_train_dir = FLAGS.train_dir
 
   FLAGS.train_dir = initial_train_dir + str(from_level)
@@ -759,33 +765,73 @@ def run_basic_schedule(checkpoint_path, from_level, to_level, max_steps_per_leve
     FLAGS.train_dir = initial_train_dir + str(i)
     checkpoint_path = one_train_cycle(i, checkpoint_path, True)
 
-def run_species_schedule(checkpoint_path):
+def species_schedule(checkpoint_path):
   initial_train_dir = FLAGS.train_dir
 
-  FLAGS.max_number_of_steps = 1000
+  FLAGS.max_number_of_steps = 10000
   FLAGS.train_dir = initial_train_dir + '3'
   checkpoint_path = one_train_cycle(3, checkpoint_path, False, False)
 
-  FLAGS.max_number_of_steps = 1500
+  FLAGS.max_number_of_steps = 15000
   FLAGS.train_dir = initial_train_dir + '4'
   checkpoint_path = one_train_cycle(4, checkpoint_path, True)
 
-  FLAGS.max_number_of_steps = 2000
+  FLAGS.max_number_of_steps = 20000
   FLAGS.train_dir = initial_train_dir + '5'
   checkpoint_path = one_train_cycle(5, checkpoint_path, True)
 
-  FLAGS.max_number_of_steps = 7500
+  FLAGS.max_number_of_steps = 50000
   FLAGS.train_dir = initial_train_dir + '6'
   checkpoint_path = one_train_cycle(6, checkpoint_path, True)
 
+def default_schedule(checkpoint_path):
+  basic_schedule(checkpoint_path, 0, 6, 10)
+
+def complete_train_schedule(checkpoint_path):
+    initial_train_dir = FLAGS.train_dir
+
+    FLAGS.learning_rate = 0.5
+    FLAGS.max_number_of_steps = 5000
+    FLAGS.train_dir = initial_train_dir + '2'
+    checkpoint_path = one_train_cycle(2, checkpoint_path, False, False)
+
+    FLAGS.learning_rate = 0.4
+    FLAGS.max_number_of_steps = 5000
+    FLAGS.train_dir = initial_train_dir + '3'
+    checkpoint_path = one_train_cycle(3, checkpoint_path, True)
+
+    FLAGS.learning_rate = 0.2
+    FLAGS.max_number_of_steps = 10000
+    FLAGS.train_dir = initial_train_dir + '4'
+    checkpoint_path = one_train_cycle(4, checkpoint_path, True)
+
+    FLAGS.learning_rate = 0.2
+    FLAGS.max_number_of_steps = 10000
+    FLAGS.train_dir = initial_train_dir + '5'
+    checkpoint_path = one_train_cycle(5, checkpoint_path, True)
+
+    FLAGS.learning_rate = 0.01
+    FLAGS.max_number_of_steps = 20000
+    FLAGS.train_dir = initial_train_dir + '6'
+    checkpoint_path = one_train_cycle(6, checkpoint_path, True)
+
+schedules = {
+    'basic_schedule': basic_schedule,
+    'default_schedule': default_schedule,
+    'complete_train_schedule': complete_train_schedule,
+}
+
 def main(_):
 
-  if tf.gfile.IsDirectory(FLAGS.checkpoint_path):
+  if FLAGS.checkpoint_path is None:
+      checkpoint_path = None
+  elif tf.gfile.IsDirectory(FLAGS.checkpoint_path):
     checkpoint_path = tf.train.latest_checkpoint(FLAGS.checkpoint_path)
   else:
     checkpoint_path = FLAGS.checkpoint_path
 
-  run_species_schedule(checkpoint_path)
+  schedules[FLAGS.schedule](checkpoint_path)
+
   # run_basic_schedule(checkpoint_path, 3, 6, 10)
   # initial_train_dir = FLAGS.train_dir
   #

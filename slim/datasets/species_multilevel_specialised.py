@@ -94,7 +94,7 @@ class SpeciesDataset(object):
     if self.labelmap_tensor is None:
 
       label_map = []
-      file = open('/home/dm116/Workspace/MultiLevelSoftmax/index_map.dat', 'r')
+      file = open('/home/jeff/Workspace/MultiLevelSoftmax/index_map.dat', 'r')
       for line in file:
         label_map.append(int(line[:-1]))
 

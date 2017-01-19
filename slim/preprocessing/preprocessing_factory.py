@@ -26,6 +26,7 @@ from preprocessing import lenet_preprocessing
 from preprocessing import vgg_preprocessing
 from preprocessing import fish_preprocessing
 from preprocessing import species_preprocessing
+from preprocessing import stinkbug_preprocessing
 
 slim = tf.contrib.slim
 
@@ -55,6 +56,7 @@ def get_preprocessing(name, is_training=False):
       'inception_v4': inception_preprocessing,
       'inception_resnet_v2': inception_preprocessing,
       'fishnet': fish_preprocessing,
+      'stinkbug': stinkbug_preprocessing,
       'lenet': lenet_preprocessing,
       'resnet_v1_50': vgg_preprocessing,
       'resnet_v1_101': vgg_preprocessing,
