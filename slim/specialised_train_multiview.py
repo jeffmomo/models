@@ -587,7 +587,6 @@ def one_train_cycle(current_level, checkpoint_path, expand_logits, restore_logit
     #####################################
     # Select the preprocessing function #
     #####################################
-    image_preprocessing_fn = species_preprocessing.preprocess_image
 
     ##############################################################
     # Create a dataset provider that loads data from the dataset #
@@ -603,9 +602,8 @@ def one_train_cycle(current_level, checkpoint_path, expand_logits, restore_logit
 
       train_image_size = FLAGS.train_image_size or 299
 
-      image_main = image_preprocessing_fn(image, train_image_size, train_image_size, is_training=True)
-      image_side = image_preprocessing_fn(image, train_image_size, train_image_size, is_training=True, is_main=False)
-
+      image_main, image_side = species_preprocessing.preproces_for_train_multi(image, train_image_size, train_image_size)
+      # image_side = image_preprocessing_fn(image, train_image_size, train_image_size, is_training=True, is_main=False)
 
       images_main, images_side, labels = tf.train.batch(
           [image_main, image_side, label],
