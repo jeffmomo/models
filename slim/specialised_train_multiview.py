@@ -170,7 +170,7 @@ tf.app.flags.DEFINE_float(
 # Dataset Flags #
 #######################
 
-import datasets.species_multilevel_specialised as species_multilevel_specialised
+import datasets.species_big_specialised as species_big_specialised
 
 tf.app.flags.DEFINE_string(
     'dataset_split_name', 'train', 'The name of the train/test split.')
@@ -184,7 +184,7 @@ tf.app.flags.DEFINE_integer(
     'evaluate the VGG and ResNet architectures which do not use a background '
     'class for the ImageNet dataset.')
 
-import preprocessing.species_preprocessing as species_preprocessing
+import preprocessing.species_big_preprocessing as species_big_preprocessing
 
 tf.app.flags.DEFINE_integer(
     'batch_size', 32, 'The number of samples in each batch.')
@@ -564,7 +564,7 @@ def one_train_cycle(current_level, checkpoint_path, expand_logits, restore_logit
     ######################
     # Select the dataset #
     ######################
-    dataset = species_multilevel_specialised.SpeciesDataset(current_level).get_split(FLAGS.dataset_split_name, FLAGS.dataset_dir)
+    dataset = species_big_specialised.SpeciesDataset(current_level).get_split(FLAGS.dataset_split_name, FLAGS.dataset_dir)
 
     ####################
     # Select the network #
@@ -602,7 +602,7 @@ def one_train_cycle(current_level, checkpoint_path, expand_logits, restore_logit
 
       train_image_size = FLAGS.train_image_size or 299
 
-      image_main, image_side = species_preprocessing.preproces_for_train_multi(image, train_image_size, train_image_size)
+      image_main, image_side = species_big_preprocessing.preprocess_for_train_multi(image, train_image_size, train_image_size)
       # image_side = image_preprocessing_fn(image, train_image_size, train_image_size, is_training=True, is_main=False)
 
       images_main, images_side, labels = tf.train.batch(
@@ -715,7 +715,7 @@ def one_train_cycle(current_level, checkpoint_path, expand_logits, restore_logit
 
 
 
-    train_tensor = control_flow_ops.with_dependencies([update_op], tf.Print(total_loss, tf.get_collection(tf.GraphKeys.MODEL_VARIABLES, 'InceptionResnetV2/Main/Logits')),
+    train_tensor = control_flow_ops.with_dependencies([update_op], tf.Print(total_loss, tf.get_collection(tf.GraphKeys.MODEL_VARIABLES, 'InceptionResnetV2/Logits')),
                                                       name='train_op')
 
     # Add the summaries from the first clone. These contain the summaries
@@ -794,7 +794,9 @@ def species_schedule(checkpoint_path):
   checkpoint_path = one_train_cycle(6, checkpoint_path, True)
 
 def default_schedule(checkpoint_path):
-  basic_schedule(checkpoint_path, 0, 6, 10000)
+  one_train_cycle(None, checkpoint_path, False, False)
+
+  # basic_schedule(checkpoint_path, 0, 6, 10000)
 
 def complete_train_schedule(checkpoint_path):
     initial_train_dir = FLAGS.train_dir

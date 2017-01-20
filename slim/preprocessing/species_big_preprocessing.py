@@ -101,7 +101,7 @@ def distorted_bounding_box_crop(image,
                                 bbox,
                                 min_object_covered=0.1,
                                 aspect_ratio_range=(0.75, 1.33),
-                                area_range=(0.5, 1.0),
+                                area_range=(0.4, 1.0),
                                 max_attempts=100,
                                 scope=None):
   """Generates cropped_image using a one of the bboxes randomly distorted.
@@ -285,7 +285,7 @@ def preprocess_for_train_multi(image, height, width, bbox=None,
     image_with_distorted_box = tf.image.draw_bounding_boxes(
         tf.expand_dims(image, 0), distorted_bbox)
 
-    distorted_image_central = tf.image.resize_image_with_crop_or_pad(image, 100, 100) # tf.image.central_crop(image, 0.33)
+    distorted_image_central = tf.image.resize_image_with_crop_or_pad(image, 299, 299) #
     tf.image_summary('images_with_distorted_bounding_box', image_with_distorted_box)
 
 
