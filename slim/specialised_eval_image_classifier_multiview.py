@@ -25,7 +25,7 @@ from datasets import dataset_factory
 from nets import nets_factory
 from preprocessing import preprocessing_factory
 
-from datasets import species_multilevel_specialised
+from datasets import species_big
 
 slim = tf.contrib.slim
 
@@ -69,7 +69,7 @@ tf.app.flags.DEFINE_integer(
 tf.app.flags.DEFINE_string(
     'model_name', 'inception_v3', 'The name of the architecture to evaluate.')
 
-import preprocessing.species_preprocessing as species_preprocessing
+import preprocessing.species_big_preprocessing as species_big_preprocessing
 
 tf.app.flags.DEFINE_float(
     'moving_average_decay', None,
@@ -93,8 +93,9 @@ def main(_):
     ######################
     # Select the dataset #
     ######################
-    dataset = species_multilevel_specialised.SpeciesDataset(FLAGS.current_level).get_split(FLAGS.dataset_split_name, FLAGS.dataset_dir)
-
+    dataset = species_big.SpeciesDataset(FLAGS.current_level).get_split(FLAGS.dataset_split_name, FLAGS.dataset_dir)
+    print(FLAGS.current_level)
+    print(dataset.num_classes)
 
     ####################
     # Select the model #
@@ -114,7 +115,7 @@ def main(_):
         shuffle=False,
         common_queue_capacity=2 * FLAGS.batch_size,
         common_queue_min=FLAGS.batch_size)
-    [image, label] = provider.get(['image', 'label'])
+    [image, label, filename] = provider.get(['image', 'label', 'filename'])
     label -= FLAGS.labels_offset
 
     #####################################
@@ -123,10 +124,10 @@ def main(_):
 
     eval_image_size = FLAGS.eval_image_size or 299
 
-    image_main, image_side = species_preprocessing.preprocess_for_eval_multi(image, eval_image_size, eval_image_size)
+    image_main, image_side = species_big_preprocessing.preprocess_for_eval_multi(image, eval_image_size, eval_image_size)
 
-    images_main, images_side, labels = tf.train.batch(
-        [image_main, image_side, label],
+    images_main, images_side, labels, filenames = tf.train.batch(
+        [image_main, image_side, label, filename],
         batch_size=FLAGS.batch_size,
         num_threads=FLAGS.num_preprocessing_threads,
         capacity=5 * FLAGS.batch_size)
@@ -147,6 +148,7 @@ def main(_):
 
     predictions = tf.argmax(logits, 1)
     labels = tf.squeeze(labels)
+
 
     # Define the metrics:
     names_to_values, names_to_updates = slim.metrics.aggregate_metric_map({
@@ -175,6 +177,19 @@ def main(_):
       checkpoint_path = FLAGS.checkpoint_path
 
     tf.logging.info('Evaluating %s' % checkpoint_path)
+
+
+    def write_out(logits_out, labels_out, filenames_out):
+      for idx in range(0, len(logits_out)):
+        # print(len(logits_out[idx]))
+        # print()
+        #assert labels_out[idx] >= 0 and labels_out[idx] <= 2062, 'bad index..'
+        print(">", ','.join(['%.7f' % num for num in logits_out[idx]]))
+        print(">ident", labels_out[idx], str(filenames_out[idx], 'utf-8'))
+
+      return logits_out, labels_out, filenames_out
+
+    eval_op = [tf.nn.in_top_k(logits, labels, 1), tf.nn.in_top_k(logits, labels, 5), tf.py_func(write_out, [tf.nn.softmax(logits), labels, filenames], [tf.float32, tf.int64, tf.string])]
 
     slim.evaluation.evaluate_once(
         master=FLAGS.master,

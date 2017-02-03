@@ -19,6 +19,7 @@ from __future__ import division
 from __future__ import print_function
 
 import tensorflow as tf
+import math
 
 from tensorflow.python.ops import control_flow_ops
 from datasets import dataset_factory
@@ -147,10 +148,10 @@ tf.app.flags.DEFINE_float(
     'label_smoothing', 0.0, 'The amount of label smoothing.')
 
 tf.app.flags.DEFINE_float(
-    'learning_rate_decay_factor', 0.94, 'Learning rate decay factor.')
+    'learning_rate_decay_factor', 0.90, 'Learning rate decay factor.')
 
 tf.app.flags.DEFINE_float(
-    'num_epochs_per_decay', 2.0,
+    'num_epochs_per_decay', 2,
     'Number of epochs after which learning rate decays.')
 
 tf.app.flags.DEFINE_bool(
@@ -170,7 +171,7 @@ tf.app.flags.DEFINE_float(
 # Dataset Flags #
 #######################
 
-import datasets.species_big_specialised as species_big_specialised
+import datasets.species_big as species_big
 
 tf.app.flags.DEFINE_string(
     'dataset_split_name', 'train', 'The name of the train/test split.')
@@ -231,15 +232,16 @@ tf.app.flags.DEFINE_boolean(
 tf.app.flags.DEFINE_string('schedule', 'default_schedule',
                            'The training schedule to use - i.e. when to switch training levels')
 
+tf.app.flags.DEFINE_float(
+    'randomness_factor', 0.01, 'The randomness coefficient used for variance of glorot initialisation from restored weights')
+
+tf.app.flags.DEFINE_integer('skip_to', 0, 'The stage to skip to. Leave as 0 if no skipping')
+
 FLAGS = tf.app.flags.FLAGS
 
 
-hierarchy_tree = get_hierarchy.generate_tree()
-hierarchy_tree.prune(threshold=100)
-
+hierarchy_tree = get_hierarchy.pruned_tree
 def_lst, idx_map = hierarchy_tree.get_tree_index_mappings()
-
-
 
 
 
@@ -370,10 +372,11 @@ class MyBuilder(BaseSaverBuilder):
     # pylint: disable=protected-access
     from tensorflow.python.ops import io_ops
 
-    lsw = ["InceptionResnetV2/Logits/Logits/weights", "InceptionResnetV2/AuxLogits/Logits/weights"] if self.expand else []
-    lsb = ["InceptionResnetV2/AuxLogits/Logits/biases", "InceptionResnetV2/Logits/Logits/biases"] if self.expand else []
+    lsw = ["InceptionResnetV2/Logits/Logits/weights", "InceptionResnetV2/AuxLogits/Logits/weights", "InceptionResnetV2/Side/AuxLogits/Logits/weights"] if self.expand else []
+    lsb = ["InceptionResnetV2/AuxLogits/Logits/biases", "InceptionResnetV2/Logits/Logits/biases", "InceptionResnetV2/Side/AuxLogits/Logits/biases"] if self.expand else []
 
-
+    # calculate the variance for uniform xavier initialisation, given the 20k class dataset, using fan_avg technique
+    factor = math.sqrt(FLAGS.randomness_factor * 3 / 1536)
 
     tensors = []
     for spec in saveable.specs:
@@ -389,7 +392,7 @@ class MyBuilder(BaseSaverBuilder):
 
         to_append = tf.transpose(tf.gather(tf.transpose(restored), self.translationmap_tensors[self.level]))
         print(to_append, to_append.get_shape())
-        to_append = to_append + tf.random_uniform(tf.shape(to_append), minval=-0.001, maxval=0.001) #(initializers.xavier_initializer()([int(spec.slice_spec.split(' ')[0]), len(idx_map[self.level])]) / 3)
+        to_append = to_append + tf.random_uniform(tf.shape(to_append), minval=-factor, maxval=factor) #(initializers.xavier_initializer()([int(spec.slice_spec.split(' ')[0]), len(idx_map[self.level])]) / 3)
         # todo: Explore the effects of randomness, and what variance I should use.
 
         tensors.append(to_append)
@@ -472,8 +475,13 @@ def _get_init_fn(level, checkpoint_path, expand, restore_logits):
   exclusions = []
   if not restore_logits:
     exclusions = [scope.strip()
-                  for scope in 'InceptionResnetV2/AuxLogits/Logits,InceptionResnetV2/Logits'.split(',')]
+                  for scope in 'InceptionResnetV2/AuxLogits/Logits,InceptionResnetV2/Logits,InceptionResnetV2/Side/AuxLogits/Logits'.split(',')]
 
+  if FLAGS.checkpoint_exclude_scopes:
+    exclusions.extend([scope.strip()
+                  for scope in FLAGS.checkpoint_exclude_scopes.split(',')])
+
+  # print(exclusions)
   # TODO(sguada) variables.filter_variables()
   variables_to_restore = []
   for var in slim.get_model_variables():
@@ -485,7 +493,7 @@ def _get_init_fn(level, checkpoint_path, expand, restore_logits):
     if not excluded:
       variables_to_restore.append(var)
 
-
+  # print(variables_to_restore)
 
   tf.logging.info('Fine-tuning from %s' % checkpoint_path)
 
@@ -517,32 +525,9 @@ def _get_variables_to_train():
   return variables_to_train
 
 
-
-
-
-
-
-
-
 def one_train_cycle(current_level, checkpoint_path, expand_logits, restore_logits=True):
   if not FLAGS.dataset_dir:
     raise ValueError('You must supply the dataset directory with --dataset_dir')
-
-
-  # translationmap_tensors = None
-  # def get_translation_map():
-  #
-  #   global translationmap_tensors
-  #
-  #   if translationmap_tensors is None:
-  #     print(idx_map)
-  #     translationmap_tensors = []
-  #
-  #     for item in idx_map:
-  #       translationmap_tensors.append(tf.convert_to_tensor(item, tf.int32))
-  #
-  #   return translationmap_tensors
-
 
   tf.logging.set_verbosity(tf.logging.INFO)
   with tf.Graph().as_default():
@@ -564,7 +549,9 @@ def one_train_cycle(current_level, checkpoint_path, expand_logits, restore_logit
     ######################
     # Select the dataset #
     ######################
-    dataset = species_big_specialised.SpeciesDataset(current_level).get_split(FLAGS.dataset_split_name, FLAGS.dataset_dir)
+    dataset = species_big.SpeciesDataset(current_level).get_split(FLAGS.dataset_split_name, FLAGS.dataset_dir)
+
+    print(dataset.num_classes)
 
     ####################
     # Select the network #
@@ -711,10 +698,6 @@ def one_train_cycle(current_level, checkpoint_path, expand_logits, restore_logit
 
     update_op = tf.group(*update_ops)
 
-    print(list(map(lambda x: (x.op.name, x, tf.shape(x)), tf.get_collection(tf.GraphKeys.MODEL_VARIABLES, 'InceptionResnetV2/Main/Logits'))))
-
-
-
     train_tensor = control_flow_ops.with_dependencies([update_op], tf.Print(total_loss, tf.get_collection(tf.GraphKeys.MODEL_VARIABLES, 'InceptionResnetV2/Logits')),
                                                       name='train_op')
 
@@ -761,20 +744,24 @@ def one_train_cycle(current_level, checkpoint_path, expand_logits, restore_logit
 
 
 
-def basic_schedule(checkpoint_path, from_level=3, to_level=6, max_steps_per_level=10000):
+def basic_schedule(checkpoint_path, from_level=0, to_level=6, max_steps_per_level=100, **kwargs):
+  FLAGS.native_indices = False
+
   initial_train_dir = FLAGS.train_dir
 
   FLAGS.train_dir = initial_train_dir + str(from_level)
   FLAGS.max_number_of_steps = max_steps_per_level
 
-
   checkpoint_path = one_train_cycle(from_level, checkpoint_path, False, False)
+  FLAGS.checkpoint_exclude_scopes = None
 
   for i in range(from_level + 1, to_level + 1):
     FLAGS.train_dir = initial_train_dir + str(i)
     checkpoint_path = one_train_cycle(i, checkpoint_path, True)
 
-def species_schedule(checkpoint_path):
+def species_schedule(checkpoint_path, **kwargs):
+  FLAGS.native_indices = False
+
   initial_train_dir = FLAGS.train_dir
 
   FLAGS.max_number_of_steps = 10000
@@ -793,43 +780,49 @@ def species_schedule(checkpoint_path):
   FLAGS.train_dir = initial_train_dir + '6'
   checkpoint_path = one_train_cycle(6, checkpoint_path, True)
 
-def default_schedule(checkpoint_path):
-  one_train_cycle(None, checkpoint_path, False, False)
+def default_schedule(checkpoint_path, **kwargs):
+  one_train_cycle(None, checkpoint_path, False, True)
 
-  # basic_schedule(checkpoint_path, 0, 6, 10000)
-
-def complete_train_schedule(checkpoint_path):
+def complete_train_schedule(checkpoint_path, **kwargs):
+    FLAGS.native_indices = False
     initial_train_dir = FLAGS.train_dir
 
-    FLAGS.learning_rate = 0.5
-    FLAGS.max_number_of_steps = 5000
-    FLAGS.train_dir = initial_train_dir + '2'
-    checkpoint_path = one_train_cycle(2, checkpoint_path, False, False)
+    if kwargs['skip_to'] <= 3:
 
-    FLAGS.learning_rate = 0.3
-    FLAGS.max_number_of_steps = 30000
-    FLAGS.train_dir = initial_train_dir + '3'
-    checkpoint_path = one_train_cycle(3, checkpoint_path, True)
+      FLAGS.learning_rate = 0.1
+      FLAGS.max_number_of_steps = 10000
+      FLAGS.train_dir = initial_train_dir + '3'
+      checkpoint_path = one_train_cycle(3, checkpoint_path, False, True)
 
-    FLAGS.learning_rate = 0.3
-    FLAGS.max_number_of_steps = 30000
-    FLAGS.train_dir = initial_train_dir + '4'
-    checkpoint_path = one_train_cycle(4, checkpoint_path, True)
+    if kwargs['skip_to'] <= 4:
 
-    FLAGS.learning_rate = 0.1
-    FLAGS.max_number_of_steps = 60000
-    FLAGS.train_dir = initial_train_dir + '5'
-    checkpoint_path = one_train_cycle(5, checkpoint_path, True)
+      FLAGS.checkpoint_exclude_scopes = None
+      FLAGS.randomness_factor = 0.1
+      FLAGS.learning_rate = 0.02
+      FLAGS.max_number_of_steps = 50000
+      FLAGS.train_dir = initial_train_dir + '4'
+      checkpoint_path = one_train_cycle(4, checkpoint_path, True)
 
-    FLAGS.learning_rate = 0.01
-    FLAGS.max_number_of_steps = 80000
-    FLAGS.train_dir = initial_train_dir + '6'
-    checkpoint_path = one_train_cycle(6, checkpoint_path, True)
+    if kwargs['skip_to'] <= 5:
+
+      FLAGS.randomness_factor = 0.0005
+      FLAGS.learning_rate = 0.01
+      FLAGS.max_number_of_steps = 50000
+      FLAGS.train_dir = initial_train_dir + '5'
+      checkpoint_path = one_train_cycle(5, checkpoint_path, True)
+
+    if kwargs['skip_to'] <= 6:
+
+      FLAGS.randomness_factor = 0.1
+      FLAGS.learning_rate = 0.1
+      FLAGS.max_number_of_steps = 150000
+      FLAGS.train_dir = initial_train_dir + '6'
+      checkpoint_path = one_train_cycle(6, checkpoint_path, True)
 
 schedules = {
     'basic_schedule': basic_schedule,
     'default_schedule': default_schedule,
-    'complete_train_schedule': complete_train_schedule,
+    'complete_schedule': complete_train_schedule,
 }
 
 def main(_):
@@ -841,18 +834,10 @@ def main(_):
   else:
     checkpoint_path = FLAGS.checkpoint_path
 
-  schedules[FLAGS.schedule](checkpoint_path)
+  if FLAGS.skip_to > 0:
+    print("Skipping to level: ", FLAGS.skip_to)
 
-  # run_basic_schedule(checkpoint_path, 3, 6, 10)
-  # initial_train_dir = FLAGS.train_dir
-  #
-  # FLAGS.train_dir = initial_train_dir + '0'
-  # checkpoint_path = one_train_cycle(0, checkpoint_path, False)
-  # FLAGS.train_dir = initial_train_dir + '1'
-  # one_train_cycle(1, checkpoint_path, True)
-
-
-
+  schedules[FLAGS.schedule](checkpoint_path, skip_to=FLAGS.skip_to)
 
 if __name__ == '__main__':
   tf.app.run()

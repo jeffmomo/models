@@ -27,142 +27,167 @@ import tensorflow as tf
 
 from datasets import dataset_utils
 
+from hierarchy import get_hierarchy
+
 slim = tf.contrib.slim
 
-_FILE_PATTERN = '%s-*'
+_TOTAL_CLASSES = 19027
+_LEAF_DEPTH = 6
 
-SPLITS_TO_SIZES = {'train': 1000000, 'validation': 214141}
+tf.app.flags.DEFINE_integer('current_level', _LEAF_DEPTH,
+                            'The current level to train on, with 0 being the root')
+tf.app.flags.DEFINE_boolean('native_indices', True,
+                            'Whether to use the indices as specified by labels.txt')
 
-_NUM_CLASSES = 19027
+current_level = tf.app.flags.FLAGS.current_level
+native_indices = tf.app.flags.FLAGS.native_indices
 
-_ITEMS_TO_DESCRIPTIONS = {
+
+hierarchy_tree = get_hierarchy.generate_tree()
+hierarchy_tree.prune(threshold=5)
+hierarchy_tree.prune_by_names(get_hierarchy.get_20k_label_mappings())
+
+
+
+assert len(hierarchy_tree.children()) == _TOTAL_CLASSES, "Unexpected number of classes"
+
+def_lst, idx_map = hierarchy_tree.get_tree_index_mappings()
+
+
+class SpeciesDataset(object):
+
+  _FILE_PATTERN = 'species_full_%s_*'
+
+  SPLITS_TO_SIZES = {'train': 1000000, 'validation': 214141}
+
+
+  _ITEMS_TO_DESCRIPTIONS = {
     'image': 'A color image of varying size.',
     'label': 'A single integer between 0 and 4',
     'filename': 'File name of the image',
-}
-
-tf.app.flags.DEFINE_integer('current_level', 0,
-                            'The current level to train on, with 0 being the root')
-
-current_level = tf.app.flags.FLAGS.current_level
-
-#
-# label_map = []
-# translationmap_tensor = None
-#
-# def get_label_map():
-#
-#     if not len(label_map):
-#
-#         file = open('/home/dm116/Workspace/MultiLevelSoftmax/index_map.dat', 'r')
-#         for line in file:
-#             label_map.append(int(line[:-1]))
-#
-#         global translationmap_tensor
-#         labelmap_tensor = tf.convert_to_tensor(label_map, tf.int32)
-#         return labelmap_tensor
-#
-#     return labelmap_tensor
-#
-#
-#
-# embeddings_tensor = None
-#
-# def get_embeddings_map():
-#     global embeddings_tensor
-#
-#     if embeddings_tensor is None:
-#         with open('/home/dm116/Workspace/MultiLevelSoftmax/spilled.dat', 'r') as f:
-#             mapping = []
-#
-#             for line in f:
-#                 mapping.append([float(x) for x in line[:-1].split(',')])
-#
-#             # To get rid of the background class
-#             mapping.insert(0, mapping[0])
-#
-#             embeddings_tensor = tf.convert_to_tensor(mapping, tf.float32)
-#
-#         return embeddings_tensor
-#     else:
-#         return embeddings_tensor
-#
-#
-#
-# class ModdedTensor(slim.tfexample_decoder.Tensor):
-#
-#   def __init__(self, tensor_key, shape_keys=None, shape=None, default_value=0):
-#     super(ModdedTensor, self).__init__(tensor_key, shape_keys, shape, default_value)
-#
-#     self.old_tensors_to_item = self.tensors_to_item
-#     self.tensors_to_item = self.new_tensors_to_item
-#
-#
-#   def new_tensors_to_item(self, keys_to_tensors):
-#     # to avoid background class for resnet
-#     out = tf.squeeze(tf.gather(get_label_map(), self.old_tensors_to_item(keys_to_tensors))) - 1
-#     print(out)
-#     return out
-#
-
-def get_split(split_name, dataset_dir, file_pattern=None, reader=None):
-  """Gets a dataset tuple with instructions for reading cifar10.
-
-  Args:
-    split_name: A train/validation split name.
-    dataset_dir: The base directory of the dataset sources.
-    file_pattern: The file pattern to use when matching the dataset sources.
-      It is assumed that the pattern contains a '%s' string so that the split
-      name can be inserted.
-    reader: The TensorFlow reader type.
-
-  Returns:
-    A `Dataset` namedtuple.
-
-  Raises:
-    ValueError: if `split_name` is not a valid train/validation split.
-  """
-  if split_name not in SPLITS_TO_SIZES:
-    raise ValueError('split name %s was not recognized.' % split_name)
-
-  if not file_pattern:
-    file_pattern = _FILE_PATTERN
-  file_pattern = os.path.join(dataset_dir, file_pattern % split_name)
-
-  # Allowing None in the signature so that dataset_factory can use the default.
-  if reader is None:
-    reader = tf.TFRecordReader
-
-
-  # label_embeddings_batch = tf.gather(get_embeddings(), label_index_batch)
-
-
-  keys_to_features = {
-      'image/encoded': tf.FixedLenFeature((), tf.string, default_value=''),
-      'image/class/label': tf.FixedLenFeature([1], tf.int64, default_value=-1),
-      'image/format': tf.FixedLenFeature((), tf.string, default_value='jpeg'),
-      'image/filename': tf.FixedLenFeature([], dtype=tf.string,
-                                             default_value=''),
   }
 
-  items_to_handlers = {
-      'image': slim.tfexample_decoder.Image(),
-      'label': slim.tfexample_decoder.Tensor('image/class/label'),
-      'filename': slim.tfexample_decoder.Tensor('image/filename'),
-  }
+  class ModdedTensor(slim.tfexample_decoder.Tensor):
 
-  decoder = slim.tfexample_decoder.TFExampleDecoder(
-      keys_to_features, items_to_handlers)
+    def __init__(self, dataset, tensor_key, shape_keys=None, shape=None, default_value=0, use_native_indices=True,
+                 translate=True):
+      print(use_native_indices, translate)
+      super(SpeciesDataset.ModdedTensor, self).__init__(tensor_key, shape_keys, shape, default_value)
 
-  labels_to_names = None
-  if dataset_utils.has_labels(dataset_dir):
-    labels_to_names = dataset_utils.read_label_file(dataset_dir)
+      self.old_tensors_to_item = self.tensors_to_item
+      self.tensors_to_item = self.new_tensors_to_item
 
-  return slim.dataset.Dataset(
-      data_sources=file_pattern,
-      reader=reader,
-      decoder=decoder,
-      num_samples=SPLITS_TO_SIZES[split_name],
-      items_to_descriptions=_ITEMS_TO_DESCRIPTIONS,
-      num_classes=_NUM_CLASSES,
-      labels_to_names=labels_to_names)
+      self.dataset = dataset
+      self.translate = translate
+      self.use_native_indices = use_native_indices or translate
+
+    def new_tensors_to_item(self, keys_to_tensors):
+
+      originals = self.old_tensors_to_item(keys_to_tensors)
+
+      if not self.use_native_indices:
+        indices = tf.squeeze(tf.gather(self.dataset.get_label_map(), originals))
+        print('not using natives')
+      else:
+        indices = originals
+
+      if self.translate:
+        out = tf.gather(self.dataset.get_translation_map(), indices)
+      else:
+        out = indices
+
+      return out
+
+  def __init__(self, level=_LEAF_DEPTH):
+
+    self.level = level
+    self._NUM_CLASSES = len(def_lst[level])
+    self.translationmap_tensor = None
+    self.labelmap_tensor = None
+
+  def get_label_map(self):
+
+    if self.labelmap_tensor is None:
+      label_map = get_hierarchy.native_to_hierarchical_translation_map(hierarchy_tree)
+
+      self.labelmap_tensor = tf.convert_to_tensor(label_map, tf.int64)
+
+    return self.labelmap_tensor
+
+  def get_translation_map(self):
+
+    if self.translationmap_tensor is None:
+      label_map = []
+
+      for i in range(0, _TOTAL_CLASSES):
+        label_map.append(get_hierarchy.translate_to_level(idx_map, self.level, i))
+
+      self.translationmap_tensor = tf.convert_to_tensor(label_map, tf.int64)
+
+    return self.translationmap_tensor
+
+  def get_split(self, split_name, dataset_dir, file_pattern=None, reader=None):
+    """Gets a dataset tuple with instructions for reading cifar10.
+
+    Args:
+      split_name: A train/validation split name.
+      dataset_dir: The base directory of the dataset sources.
+      file_pattern: The file pattern to use when matching the dataset sources.
+        It is assumed that the pattern contains a '%s' string so that the split
+        name can be inserted.
+      reader: The TensorFlow reader type.
+
+    Returns:
+      A `Dataset` namedtuple.
+
+    Raises:
+      ValueError: if `split_name` is not a valid train/validation split.
+    """
+    if split_name not in SpeciesDataset.SPLITS_TO_SIZES:
+      raise ValueError('split name %s was not recognized.' % split_name)
+
+    if not file_pattern:
+      file_pattern = SpeciesDataset._FILE_PATTERN
+    file_pattern = os.path.join(dataset_dir, file_pattern % split_name)
+
+    # Allowing None in the signature so that dataset_factory can use the default.
+    if reader is None:
+      reader = tf.TFRecordReader
+
+
+    # label_embeddings_batch = tf.gather(get_embeddings(), label_index_batch)
+
+
+    keys_to_features = {
+        'image/encoded': tf.FixedLenFeature((), tf.string, default_value=''),
+        'image/class/label': tf.FixedLenFeature((), tf.int64, default_value=-1),
+        'image/format': tf.FixedLenFeature((), tf.string, default_value='jpeg'),
+        'image/filename': tf.FixedLenFeature([], dtype=tf.string,
+                                               default_value=''),
+    }
+
+    items_to_handlers = {
+        'image': slim.tfexample_decoder.Image(),
+        'label': SpeciesDataset.ModdedTensor(self, 'image/class/label', use_native_indices=native_indices, translate=not native_indices),
+        'original_label': SpeciesDataset.ModdedTensor(self, 'image/class/label', use_native_indices=native_indices, translate=False),
+        'filename': slim.tfexample_decoder.Tensor('image/filename'),
+    }
+
+    decoder = slim.tfexample_decoder.TFExampleDecoder(
+        keys_to_features, items_to_handlers)
+
+    labels_to_names = None
+    if dataset_utils.has_labels(dataset_dir):
+      labels_to_names = dataset_utils.read_label_file(dataset_dir)
+
+    return slim.dataset.Dataset(
+        data_sources=file_pattern,
+        reader=reader,
+        decoder=decoder,
+        num_samples=SpeciesDataset.SPLITS_TO_SIZES[split_name],
+        items_to_descriptions=SpeciesDataset._ITEMS_TO_DESCRIPTIONS,
+        num_classes=self._NUM_CLASSES,
+        labels_to_names=labels_to_names)
+
+
+get_split = SpeciesDataset(current_level).get_split

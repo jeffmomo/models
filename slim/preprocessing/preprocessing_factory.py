@@ -27,6 +27,7 @@ from preprocessing import vgg_preprocessing
 from preprocessing import fish_preprocessing
 from preprocessing import species_preprocessing
 from preprocessing import stinkbug_preprocessing
+from preprocessing import species_big_preprocessing
 
 slim = tf.contrib.slim
 
@@ -66,6 +67,7 @@ def get_preprocessing(name, is_training=False):
       'vgg_16': vgg_preprocessing,
       'vgg_19': vgg_preprocessing,
       'species': species_preprocessing,
+      'species_big': species_big_preprocessing,
   }
 
   if name not in preprocessing_fn_map:
