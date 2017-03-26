@@ -49,11 +49,11 @@ tf.app.flags.DEFINE_integer(
     'are handled locally by the worker.')
 
 tf.app.flags.DEFINE_integer(
-    'num_readers', 4,
+    'num_readers', 8,
     'The number of parallel readers that read data from the dataset.')
 
 tf.app.flags.DEFINE_integer(
-    'num_preprocessing_threads', 4,
+    'num_preprocessing_threads', 8,
     'The number of threads used to create the batches.')
 
 tf.app.flags.DEFINE_integer(
@@ -436,8 +436,8 @@ def main(_):
       provider = slim.dataset_data_provider.DatasetDataProvider(
           dataset,
           num_readers=FLAGS.num_readers,
-          common_queue_capacity=20 * FLAGS.batch_size,
-          common_queue_min=10 * FLAGS.batch_size)
+          common_queue_capacity=100 * FLAGS.batch_size,
+          common_queue_min=50 * FLAGS.batch_size)
       [image, label] = provider.get(['image', 'label'])
       label -= FLAGS.labels_offset
 
@@ -453,7 +453,7 @@ def main(_):
       labels = slim.one_hot_encoding(
           labels, dataset.num_classes - FLAGS.labels_offset)
       batch_queue = slim.prefetch_queue.prefetch_queue(
-          [images, labels], capacity=2 * deploy_config.num_clones)
+          [images, labels], capacity=10 * deploy_config.num_clones)
 
     ####################
     # Define the model #

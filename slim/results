@@ -1,0 +1,16 @@
+16583
+
+## For multiview single stage validation set
+* Accuracy: 54.8%
+* Top-5: 74.2%
+
+## For multiview single stage _training_ set
+* Accuracy: 68.2%
+
+## For multiview multistage validation set
+* Accuracy: 55.8%
+* Top-5: 75.2%
+
+## For standard validation set
+* Accuracy: 46.6%
+* Top-5: XX%

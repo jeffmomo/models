@@ -148,10 +148,10 @@ tf.app.flags.DEFINE_float(
     'label_smoothing', 0.0, 'The amount of label smoothing.')
 
 tf.app.flags.DEFINE_float(
-    'learning_rate_decay_factor', 0.90, 'Learning rate decay factor.')
+    'learning_rate_decay_factor', 1, 'Learning rate decay factor.')
 
 tf.app.flags.DEFINE_float(
-    'num_epochs_per_decay', 2,
+    'num_epochs_per_decay', 10,
     'Number of epochs after which learning rate decays.')
 
 tf.app.flags.DEFINE_bool(
@@ -376,7 +376,7 @@ class MyBuilder(BaseSaverBuilder):
     lsb = ["InceptionResnetV2/AuxLogits/Logits/biases", "InceptionResnetV2/Logits/Logits/biases", "InceptionResnetV2/Side/AuxLogits/Logits/biases"] if self.expand else []
 
     # calculate the variance for uniform xavier initialisation, given the 20k class dataset, using fan_avg technique
-    factor = math.sqrt(FLAGS.randomness_factor * 3 / 1536)
+    factor = math.sqrt(6 / (1536))
 
     tensors = []
     for spec in saveable.specs:
@@ -392,14 +392,15 @@ class MyBuilder(BaseSaverBuilder):
 
         to_append = tf.transpose(tf.gather(tf.transpose(restored), self.translationmap_tensors[self.level]))
         print(to_append, to_append.get_shape())
-        to_append = to_append + tf.random_uniform(tf.shape(to_append), minval=-factor, maxval=factor) #(initializers.xavier_initializer()([int(spec.slice_spec.split(' ')[0]), len(idx_map[self.level])]) / 3)
+        # divide by 2 to recover variance
+        to_append = to_append * math.sqrt(1 - FLAGS.randomness_factor) + tf.random_uniform(tf.shape(to_append), minval=-factor, maxval=factor) * math.sqrt(FLAGS.randomness_factor) #(initializers.xavier_initializer()([int(spec.slice_spec.split(' ')[0]), len(idx_map[self.level])]) / 3)
         # todo: Explore the effects of randomness, and what variance I should use.
 
         tensors.append(to_append)
 
       elif spec.name in lsb:
 
-        to_append = tf.transpose(tf.gather(tf.transpose(restored), self.translationmap_tensors[self.level]))
+        to_append = tf.transpose(tf.gather(tf.transpose(restored), self.translationmap_tensors[self.level])) * math.sqrt(1 - FLAGS.randomness_factor)
         tensors.append(to_append)
 
       else:
@@ -781,40 +782,43 @@ def species_schedule(checkpoint_path, **kwargs):
   checkpoint_path = one_train_cycle(6, checkpoint_path, True)
 
 def default_schedule(checkpoint_path, **kwargs):
-  one_train_cycle(None, checkpoint_path, False, True)
+  one_train_cycle(FLAGS.current_level, checkpoint_path, False, True)
 
 def complete_train_schedule(checkpoint_path, **kwargs):
     FLAGS.native_indices = False
     initial_train_dir = FLAGS.train_dir
 
-    if kwargs['skip_to'] <= 3:
+    # if kwargs['skip_to'] <= 3:
+    #
+    #   FLAGS.learning_rate = 0.01
+    #   FLAGS.max_number_of_steps = 10000
+    #   FLAGS.train_dir = initial_train_dir + '3'
+    #   checkpoint_path = one_train_cycle(3, checkpoint_path, False, True)
 
-      FLAGS.learning_rate = 0.1
-      FLAGS.max_number_of_steps = 10000
-      FLAGS.train_dir = initial_train_dir + '3'
-      checkpoint_path = one_train_cycle(3, checkpoint_path, False, True)
 
-    if kwargs['skip_to'] <= 4:
 
-      FLAGS.checkpoint_exclude_scopes = None
-      FLAGS.randomness_factor = 0.1
-      FLAGS.learning_rate = 0.02
-      FLAGS.max_number_of_steps = 50000
-      FLAGS.train_dir = initial_train_dir + '4'
-      checkpoint_path = one_train_cycle(4, checkpoint_path, True)
+    # if kwargs['skip_to'] <= 4:
+    #
+    #   FLAGS.randomness_factor = 0.1
+    #   FLAGS.learning_rate = 0.1
+    #   FLAGS.max_number_of_steps = 50000
+    #   FLAGS.train_dir = initial_train_dir + '4'
+    #   checkpoint_path = one_train_cycle(4, checkpoint_path, True)
 
     if kwargs['skip_to'] <= 5:
 
-      FLAGS.randomness_factor = 0.0005
-      FLAGS.learning_rate = 0.01
-      FLAGS.max_number_of_steps = 50000
+      FLAGS.randomness_factor = 0.05
+      FLAGS.learning_rate = 0.1
+      FLAGS.max_number_of_steps = 100000
       FLAGS.train_dir = initial_train_dir + '5'
-      checkpoint_path = one_train_cycle(5, checkpoint_path, True)
+      checkpoint_path = one_train_cycle(5, checkpoint_path, False, True)
+
+    FLAGS.checkpoint_exclude_scopes = None
 
     if kwargs['skip_to'] <= 6:
 
-      FLAGS.randomness_factor = 0.1
-      FLAGS.learning_rate = 0.1
+      FLAGS.randomness_factor = 0.01
+      FLAGS.learning_rate = 0.003
       FLAGS.max_number_of_steps = 150000
       FLAGS.train_dir = initial_train_dir + '6'
       checkpoint_path = one_train_cycle(6, checkpoint_path, True)
