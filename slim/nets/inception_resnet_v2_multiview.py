@@ -121,6 +121,7 @@ def inception_resnet_v2_multiview(inputs_main, inputs_side, num_classes=1001, is
 
         def shared_conv(input, reuse):
           with slim.arg_scope([slim.conv2d], reuse=reuse):
+            end_points_main['Inputs'] = input
             #with tf.variable_scope('Shared'):
             # 149 x 149 x 32
             net = slim.conv2d(input, 32, 3, stride=2, padding='VALID',
