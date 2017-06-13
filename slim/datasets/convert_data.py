@@ -95,13 +95,13 @@ def _get_filenames_and_classes(dataset_dir):
   return photo_filenames, sorted(class_names)
 
 
-def _get_dataset_filename(dataset_dir, split_name, shard_id):
+def _get_dataset_filename(dataset_dir, split_name, shard_id, output_dir=None):
   output_filename = '%s_%s_%05d-of-%05d.tfrecord' % (
       FLAGS.dataset_name, split_name, shard_id, _NUM_SHARDS)
-  return os.path.join(dataset_dir, output_filename)
+  return os.path.join(output_dir or dataset_dir, output_filename)
 
 
-def _convert_dataset(split_name, filenames, class_names_to_ids, dataset_dir):
+def _convert_dataset(split_name, filenames, class_names_to_ids, dataset_dir, output_dir=None):
   """Converts the given filenames to a TFRecord dataset.
 
   Args:
@@ -122,7 +122,7 @@ def _convert_dataset(split_name, filenames, class_names_to_ids, dataset_dir):
 
       for shard_id in range(_NUM_SHARDS):
         output_filename = _get_dataset_filename(
-            dataset_dir, split_name, shard_id)
+            dataset_dir, split_name, shard_id, output_dir)
 
         with tf.python_io.TFRecordWriter(output_filename) as tfrecord_writer:
           start_ndx = shard_id * num_per_shard
@@ -173,7 +173,7 @@ def _dataset_exists(dataset_dir):
   return True
 
 
-def run(dataset_dir, validation_num):
+def run(dataset_dir, validation_num, output_dir=None):
   """Runs the download and conversion operation.
 
   Args:
@@ -182,7 +182,6 @@ def run(dataset_dir, validation_num):
 
   if _dataset_exists(dataset_dir):
     print('Dataset files exist. Good')
-
   photo_filenames, class_names = _get_filenames_and_classes(dataset_dir)
   class_names_to_ids = dict(zip(class_names, range(len(class_names))))
 
@@ -193,12 +192,12 @@ def run(dataset_dir, validation_num):
 
   # First, convert the training and validation sets.
   _convert_dataset('train', training_filenames, class_names_to_ids,
-                   dataset_dir)
+                   dataset_dir, output_dir)
 
   if validation_num > 0:
     validation_filenames = photo_filenames[:validation_num]
     _convert_dataset('validation', validation_filenames, class_names_to_ids,
-                   dataset_dir)
+                   dataset_dir, output_dir)
 
   # Finally, write the labels file:
   labels_to_class_names = dict(zip(range(len(class_names)), class_names))

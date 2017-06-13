@@ -46,6 +46,11 @@ tf.app.flags.DEFINE_string(
     'The directory where the output TFRecords and temporary files are saved.')
 
 tf.app.flags.DEFINE_string(
+    'output_dir',
+    None,
+    'The directory to output.')
+
+tf.app.flags.DEFINE_string(
     'dataset_name',
     'data',
     'The name of the dataset.')
@@ -60,7 +65,7 @@ def main(_):
   if not FLAGS.dataset_dir:
     raise ValueError('You must supply the dataset directory with --dataset_dir')
 
-  convert_data.run(FLAGS.dataset_dir, FLAGS.validation_num)
+  convert_data.run(FLAGS.dataset_dir, FLAGS.validation_num, output_dir=FLAGS.output_dir)
 
 if __name__ == '__main__':
   tf.app.run()
