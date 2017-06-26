@@ -23,11 +23,11 @@ from datasets import flowers
 from datasets import imagenet
 from datasets import mnist
 from datasets import species
-from datasets import species_spilled
+# from datasets import species_spilled
 from datasets import fish
 # from datasets import species_multilevel
 from datasets import stinkbug
-from datasets import species_big
+# from datasets import species_big
 from datasets import naturewatch
 
 datasets_map = {
@@ -36,11 +36,11 @@ datasets_map = {
     'imagenet': imagenet,
     'mnist': mnist,
     'species': species,
-    'species_spilled': species_spilled,
+ #   'species_spilled': species_spilled,
     'fish': fish,
     # 'species_multilevel': species_multilevel,
     'stinkbug': stinkbug,
-    'species_big': species_big,
+#    'species_big': species_big,
     'naturewatch': naturewatch
 }
 
