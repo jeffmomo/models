@@ -14,7 +14,7 @@
 # ==============================================================================
 """Generic evaluation script that evaluates a model using a given dataset."""
 
-
+import pickle
 
 
 
@@ -172,14 +172,19 @@ def main(_):
 
     tf.logging.info('Evaluating %s' % checkpoint_path)
 
-
+    out_dump = []
+    idx_dump = []
+    fn_dump = []
     def write_out(logits_out, labels_out, filenames_out):
       for idx in range(0, len(logits_out)):
         # print(len(logits_out[idx]))
         # print()
         #assert labels_out[idx] >= 0 and labels_out[idx] <= 2062, 'bad index..'
-        print(">", ','.join(['%.7f' % num for num in logits_out[idx]]))
-        print(">ident", labels_out[idx], str(filenames_out[idx], 'utf-8'))
+        out_dump.append(logits_out[idx])
+        fn_dump.append(filenames_out[idx])
+        #print(">", ','.join(['%.7f' % num for num in logits_out[idx]]))
+        idx_dump.append(labels_out[idx])
+        #print(">ident", labels_out[idx], str(filenames_out[idx], 'utf-8'))
 
       return logits_out, labels_out, filenames_out
 
@@ -190,9 +195,10 @@ def main(_):
         checkpoint_path=checkpoint_path,
         logdir=FLAGS.eval_dir,
         num_evals=num_batches,
-        eval_op=list(names_to_updates.values()),
+        eval_op=eval_op[2:],#list(names_to_updates.values()),
         variables_to_restore=variables_to_restore)
-
+    pickle.dump([out_dump, idx_dump, fn_dump], open('out.pkl', 'wb'))
 
 if __name__ == '__main__':
   tf.app.run()
+  print('DONE')

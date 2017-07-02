@@ -29,12 +29,14 @@ from datasets import fish
 from datasets import stinkbug
 # from datasets import species_big
 from datasets import naturewatch
+from datasets import naturewatch_kaggle
 
 datasets_map = {
     'cifar10': cifar10,
     'flowers': flowers,
     'imagenet': imagenet,
     'mnist': mnist,
+    'naturewatch_kaggle': naturewatch_kaggle,
     'species': species,
  #   'species_spilled': species_spilled,
     'fish': fish,

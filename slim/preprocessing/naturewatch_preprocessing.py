@@ -278,6 +278,9 @@ def preprocess_for_train_multi(image, height, width, bbox=None,
     # tf.image_summary('image_with_bounding_boxes', image_with_box)
     # tf.image_summary('image_with_bounding_boxes_central', image_with_box_central)
 
+    # Randomly flip the image horizontally.
+    image = tf.image.random_flip_left_right(image)
+
     distorted_image, distorted_bbox = distorted_bounding_box_crop(image, bbox)
     # Restore the shape since the dynamic slice based upon the bbox_size loses
     # the third dimension.
@@ -289,7 +292,7 @@ def preprocess_for_train_multi(image, height, width, bbox=None,
                          dtype=tf.float32,
                          shape=[1, 1, 4])
 
-    distorted_image_central, bbx = distorted_bounding_box_crop(image, central_bb, 0.6, (0.8, 1.2), (0.01, 0.15)) #tf.image.resize_image_with_crop_or_pad(image, 299, 299) #
+    distorted_image_central, bbx = distorted_bounding_box_crop(image, central_bb, 0.5, (0.8, 1.2), (0.25, 0.6)) #tf.image.resize_image_with_crop_or_pad(image, 299, 299) #
     distorted_image_central.set_shape([None, None, 3])
     image_with_distorted_box_central = tf.image.draw_bounding_boxes(tf.image.draw_bounding_boxes(
       tf.expand_dims(image, 0), bbx), central_bb)
@@ -318,10 +321,6 @@ def preprocess_for_train_multi(image, height, width, bbox=None,
 
     tf.image_summary('cropped_resized_image', tf.expand_dims(distorted_image, 0))
     tf.image_summary('cropped_resized_image_central', tf.expand_dims(distorted_image_central, 0))
-
-    # Randomly flip the image horizontally.
-    distorted_image = tf.image.random_flip_left_right(distorted_image)
-    distorted_image_central = tf.image.random_flip_left_right(distorted_image_central)
 
     # Randomly distort the colors. There are 4 ways to do it.
     distorted_image = apply_with_random_selector(
@@ -418,7 +417,7 @@ def preprocess_for_eval_multi(image, height, width,
     # the original image.
     if central_fraction:
       image_main = tf.image.central_crop(image, central_fraction=central_fraction)
-      image_central = tf.image.central_crop(image, central_fraction=0.3)
+      image_central = tf.image.central_crop(image, central_fraction=0.4)
 
 
     if height and width:
@@ -469,3 +468,4 @@ def preprocess_image(image, height, width,
     return preprocess_for_train(image, height, width, bbox, fast_mode, is_main=is_main)
   else:
     return preprocess_for_eval(image, height, width, is_main=is_main)
+
