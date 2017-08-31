@@ -195,7 +195,7 @@ def main(_):
         checkpoint_path=checkpoint_path,
         logdir=FLAGS.eval_dir,
         num_evals=num_batches,
-        eval_op=eval_op[2:],#list(names_to_updates.values()),
+        eval_op=list(names_to_updates.values()),
         variables_to_restore=variables_to_restore)
     pickle.dump([out_dump, idx_dump, fn_dump], open('out.pkl', 'wb'))
 

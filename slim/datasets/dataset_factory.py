@@ -30,6 +30,7 @@ from datasets import stinkbug
 # from datasets import species_big
 from datasets import naturewatch
 from datasets import naturewatch_kaggle
+from datasets import herox
 
 datasets_map = {
     'cifar10': cifar10,
@@ -43,7 +44,8 @@ datasets_map = {
     # 'species_multilevel': species_multilevel,
     'stinkbug': stinkbug,
 #    'species_big': species_big,
-    'naturewatch': naturewatch
+    'naturewatch': naturewatch,
+    'herox': herox
 }
 
 
