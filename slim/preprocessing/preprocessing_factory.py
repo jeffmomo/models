@@ -32,6 +32,12 @@ from preprocessing import naturewatch_preprocessing
 
 slim = tf.contrib.slim
 
+def get_preprocessing_multi(name, is_training=False):
+  preprop_fn_map = {
+    'naturewatch': naturewatch_preprocessing,
+    'species_big': species_big_preprocessing,
+  }
+  return preprop_fn_map[name].preprocess_for_training_multi if is_training else preprop_fn_map[name].preprocess_for_eval_multi
 
 def get_preprocessing(name, is_training=False):
   """Returns preprocessing_fn(image, height, width, **kwargs).
