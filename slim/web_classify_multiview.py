@@ -33,19 +33,6 @@ tf.app.flags.DEFINE_string(
     'The directory where the model was written to or an absolute path to a '
     'checkpoint file.')
 
-
-tf.app.flags.DEFINE_integer(
-    'num_preprocessing_threads', 4,
-    'The number of threads used to create the batches.')
-
-tf.app.flags.DEFINE_string(
-    'dataset_name', 'imagenet', 'The name of the dataset to load.')
-
-
-tf.app.flags.DEFINE_string(
-    'dataset_dir', None, 'The directory where the dataset files are stored.')
-
-
 from datasets import dataset_factory
 from nets import nets_factory
 from preprocessing import preprocessing_factory
@@ -69,68 +56,6 @@ def _GuidedReluGrad(op, grad):
   return tf.select(-tf.random_uniform(grad.get_shape(), minval=0, maxval=0.05) < grad,
                    gen_nn_ops._relu_grad(grad, op.outputs[0]), tf.zeros(grad.get_shape()))
 
-#
-# def evaluate(dataset):
-#   """Evaluate model on Dataset for a number of steps."""
-#   with tf.Graph().as_default():
-#     with tf.Session() as sess:
-#       g = tf.get_default_graph()
-#       with g.gradient_override_map({'Relu': 'GuidedRelu'}):
-#         # if True:
-#         queue = setup_queue(sess)
-#         print('queue is set up', queue)
-#         # Get images and labels from the dataset.
-#         images, indexes, priors = queue_inputs(dataset, queue)
-#
-#         # Number of classes in the Dataset label set plus 1.
-#         # Label 0 is reserved for an (unused) background class.
-#         num_classes = dataset.num_classes() + 1
-#
-#         # Build a Graph that computes the logits predictions from the
-#         # inference model.
-#         # images = tf.random_normal(stddev=0.1, dtype=tf.float32, shape=[1,299,299,3])
-#         logits, _, endpoints = inception.inference(images, num_classes)
-#
-#         #### Calculating guided backprop.
-#         squeezed_logit = tf.squeeze(logits)
-#         bottleneck = endpoints['predictions'][0]  # logits[0] #endpoints['mixed_8x8x2048b']
-#         in_var = endpoints['inputs']  # tf.Variable(0.)
-#         vals, indices = tf.nn.top_k(bottleneck, k=10)  # tf.reduce_max(bottleneck)
-#         features = endpoints['mixed_17x17x1280a']
-#         maximisers = tf.gradients([squeezed_logit[indices[0]]], [features]) * features
-#         maximisers = tf.squeeze(maximisers)
-#         # print(maximisers)
-#         feat_sum = tf.reduce_sum(maximisers, [0, 1])
-#         # print('featsum', feat_sum)
-#         _, maxindices = tf.nn.top_k(feat_sum, k=10)
-#
-#         func = tf.gather(tf.reduce_sum(features[0], [0, 1]),
-#                          maxindices)  # tf.reduce_sum(tf.slice(features[0], [0,0,maxindices[9]], [17,17,1])) #bottleneck[indices[0]]# - tf.reduce_mean(bottleneck)# + bottleneck[indices[1]] + bottleneck[indices[2]] # tf.reduce_max(bottleneck) # (tf.reduce_sum(bottleneck)) # tf.reshape(tf.one_hot(tf.argmax(bottleneck, 1), num_classes), [1, num_classes]) #bottleneck #tf.reduce_min(bottleneck)
-#         reduced_feats = tf.reduce_sum(features[0], [0, 1])
-#         saliency_single = tf.gradients([func], [in_var])
-#
-#         def s_for_feat(feats, feat_idx):
-#           return normalise(tf.maximum(0.0, tf.gradients([feats[feat_idx]], [in_var])[0]))  # * feat_sum[feat_idx]
-#
-#         saliency = s_for_feat(reduced_feats, maxindices[0]) + s_for_feat(reduced_feats, maxindices[1]) + s_for_feat(
-#           reduced_feats, maxindices[2]) + s_for_feat(reduced_feats, maxindices[3])
-#
-#         saliency_identity = extract_saliency_img(normalise, saliency)
-#         img_identity = extract_rgb_image(images)
-#
-#         # Calculate predictions.
-#         # top_1_op = tf.nn.in_top_k(logits, labels, 1)
-#         # top_5_op = tf.nn.in_top_k(logits, labels, 5)
-#         out_op = tf.nn.top_k(logits, num_classes, False)
-#
-#         variable_averages = tf.train.ExponentialMovingAverage(
-#           inception.MOVING_AVERAGE_DECAY)
-#         variables_to_restore = variable_averages.variables_to_restore()
-#         saver = tf.train.Saver(variables_to_restore)
-#
-#         _eval_once(saver, out_op, img_identity, saliency_identity, indexes, priors, sess)
-#
-
 def normalise(inp):
   return (inp - tf.reduce_min(inp)) / (tf.reduce_max(inp) - tf.reduce_min(inp))
 
@@ -152,8 +77,6 @@ def extract_rgb_image(images):
   img_identity = tf.clip_by_value(img_identity, 0.0, 255)
   return img_identity
 
-
-
 def feed_iterator():
     f = open(os.path.expanduser('~/classify_pipe.fifopipe'), 'r')
     lines = f.readlines()
@@ -163,29 +86,15 @@ def feed_iterator():
                  [x.split('>>>INDEX<<<') for x in line.split(">>>EOF<<<")[:-1]]])
 
     for img, idx, priors in ls:
-      img_np = None
-
       try:
         img_np = cv2.imdecode(np.frombuffer(img, np.uint8), 1)
-      except:
-        sys.stderr.write('bad image passed\n')
+        conv_img_bytes = bytes(cv2.imencode('.jpeg', img_np)[1])
+        yield conv_img_bytes, idx, priors
+      except Exception as e:
+        print('bad image passed:', e, file=sys.stderr)
         continue
-
-      if img_np is None:
-        sys.stderr.write('bad image passed\n')
-        continue
-
-      conv_img_bytes = bytes(cv2.imencode('.jpeg', img_np)[1])
-
-      # enqueues a (string, int, string)
-      yield conv_img_bytes, idx, priors
-
-
 
 def main(_):
-  if not FLAGS.dataset_dir:
-    raise ValueError('You must supply the dataset directory with --dataset_dir')
-
   tf.logging.set_verbosity(tf.logging.INFO)
 
   with tf.Session() as sess:
@@ -196,7 +105,7 @@ def main(_):
       ######################
       # Select the dataset #
       ######################
-      dataset = species_big.SpeciesDataset(FLAGS.current_level).get_split('validation', FLAGS.dataset_dir)
+      dataset = species_big.SpeciesDataset(FLAGS.current_level).get_split('validation', '')
 
       print(FLAGS.current_level)
       print(dataset.num_classes)
@@ -210,9 +119,6 @@ def main(_):
         arg_scope = nets_factory.inception.inception_resnet_v2_multiview_arg_scope()
         with slim.arg_scope(arg_scope):
           return func(main, side, num_classes=(dataset.num_classes), is_training=False)
-
-      # Get images and labels from the dataset.
-      # images, indexes, priors = queue_inputs(dataset, queue)
 
       imgbytes, indexes, priors = tf.placeholder(tf.string), tf.placeholder(tf.int32), tf.placeholder(tf.string)
 
@@ -285,11 +191,6 @@ def main(_):
       # Start the queue runners.
       coord = tf.train.Coordinator()
       try:
-        threads = []
-        for qr in tf.get_collection(tf.GraphKeys.QUEUE_RUNNERS):
-          threads.extend(qr.create_threads(sess, coord=coord, daemon=True,
-                                           start=True))
-
         print('starting eval...')
 
         while not coord.should_stop():
@@ -318,8 +219,6 @@ def main(_):
         coord.request_stop(e)
 
       coord.request_stop()
-      coord.join(threads, stop_grace_period_secs=10)
-
 
 if __name__ == '__main__':
   tf.app.run()
