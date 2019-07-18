@@ -53,8 +53,8 @@ FLAGS = tf.app.flags.FLAGS
 
 @ops.RegisterGradient("GuidedRelu")
 def _GuidedReluGrad(op, grad):
-  return tf.select(-tf.random_uniform(grad.get_shape(), minval=0, maxval=0.05) < grad,
-                   gen_nn_ops._relu_grad(grad, op.outputs[0]), tf.zeros(grad.get_shape()))
+  return tf.where(-tf.random_uniform(grad.get_shape(), minval=0, maxval=0.05) < grad,
+                   gen_nn_ops.relu_grad(grad, op.outputs[0]), tf.zeros(grad.get_shape()))
 
 def normalise(inp):
   return (inp - tf.reduce_min(inp)) / (tf.reduce_max(inp) - tf.reduce_min(inp))
@@ -142,7 +142,7 @@ def main(_):
       else:
         variables_to_restore = slim.get_variables_to_restore()
 
-      saver = tf.train.Saver(variables_to_restore)
+      saver = tf.compat.v1.train.Saver(variables_to_restore)
 
 
       #### Calculating guided backprop.
