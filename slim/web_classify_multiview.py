@@ -154,49 +154,33 @@ def extract_rgb_image(images):
 
 
 
+def feed_iterator():
+    f = open(os.path.expanduser('~/classify_pipe.fifopipe'), 'r')
+    lines = f.readlines()
+    ls = []
+    for line in lines:
+      ls.extend([(base64.standard_b64decode(x[0]), int(x[1].split('|')[0]), x[1].split('|')[1]) for x in
+                 [x.split('>>>INDEX<<<') for x in line.split(">>>EOF<<<")[:-1]]])
 
-def setup_queue(sess):
-  queue = tf.FIFOQueue(
-    capacity=1000,
-    dtypes=[tf.string, tf.int32, tf.string])
-  main_thread_graph = tf.get_default_graph()
+    for img, idx, priors in ls:
+      img_np = None
 
-  def runFeeder():
-    with main_thread_graph.as_default():
-      while True:
-        f = open(os.path.expanduser('~/classify_pipe.fifopipe'), 'r')
-        lines = f.readlines()
-        ls = []
-        for line in lines:
-          ls.extend([(base64.standard_b64decode(x[0]), int(x[1].split('|')[0]), x[1].split('|')[1]) for x in
-                     [x.split('>>>INDEX<<<') for x in line.split(">>>EOF<<<")[:-1]]])
+      try:
+        img_np = cv2.imdecode(np.frombuffer(img, np.uint8), 1)
+      except:
+        sys.stderr.write('bad image passed\n')
+        continue
 
-        for img, idx, priors in ls:
-          img_np = None
+      if img_np is None:
+        sys.stderr.write('bad image passed\n')
+        continue
 
-          try:
-            img_np = cv2.imdecode(np.frombuffer(img, np.uint8), 1)
-          except:
-            sys.stderr.write('bad image passed\n')
-            continue
+      conv_img_bytes = bytes(cv2.imencode('.jpeg', img_np)[1])
 
-          if img_np is None:
-            sys.stderr.write('bad image passed\n')
-            continue
+      # enqueues a (string, int, string)
+      yield conv_img_bytes, idx, priors
 
-          conv_img_bytes = bytes(cv2.imencode('.jpeg', img_np)[1])
 
-          # enqueues a (string, int, string)
-          conv = (tf.convert_to_tensor(conv_img_bytes, tf.string), tf.convert_to_tensor(idx, tf.int32),
-                  tf.convert_to_tensor(priors, tf.string))
-
-          enqueue_op = queue.enqueue(vals=conv)
-          sess.run(enqueue_op)
-
-          # starts feed thread
-
-  threading.Thread(target=runFeeder).start()
-  return queue
 
 def main(_):
   if not FLAGS.dataset_dir:
@@ -213,6 +197,7 @@ def main(_):
       # Select the dataset #
       ######################
       dataset = species_big.SpeciesDataset(FLAGS.current_level).get_split('validation', FLAGS.dataset_dir)
+
       print(FLAGS.current_level)
       print(dataset.num_classes)
 
@@ -226,13 +211,11 @@ def main(_):
         with slim.arg_scope(arg_scope):
           return func(main, side, num_classes=(dataset.num_classes), is_training=False)
 
-      # if True:
-      queue = setup_queue(sess)
-      print('queue is set up', queue)
       # Get images and labels from the dataset.
       # images, indexes, priors = queue_inputs(dataset, queue)
 
-      imgbytes, indexes, priors = queue.dequeue()
+      imgbytes, indexes, priors = tf.placeholder(tf.string), tf.placeholder(tf.int32), tf.placeholder(tf.string)
+
       image = tf.image.decode_jpeg(imgbytes, channels=3)
 
       eval_image_size = FLAGS.eval_image_size or 299
@@ -242,16 +225,6 @@ def main(_):
       images_main = tf.expand_dims(image_main, 0)
       images_side = tf.expand_dims(image_side, 0)
 
-      print(images_main)
-      # images_main, images_side, labels, filenames = tf.train.batch(
-      #   [image_main, image_side, label, filename],
-      #   batch_size=FLAGS.batch_size,
-      #   num_threads=FLAGS.num_preprocessing_threads,
-      #   capacity=5 * FLAGS.batch_size)
-
-      ####################
-      # Define the model #
-      ####################
       logits, endpoints = network_fn(images_main, images_side)
 
       if FLAGS.moving_average_decay:
@@ -291,72 +264,61 @@ def main(_):
         reduced_feats, maxindices[2]) + s_for_feat(reduced_feats, maxindices[3])
 
       saliency_identity = extract_saliency_img(saliency)
-      img_identity = extract_rgb_image(images_side)
+      image_identity = extract_rgb_image(images_side)
 
-      _eval_once(saver, tf.nn.softmax(logits), img_identity, saliency_identity, indexes, priors, sess)
+      out_op = tf.nn.softmax(logits)
+      labels = indexes
 
+      if tf.gfile.IsDirectory(FLAGS.checkpoint_path):
+        checkpoint_path = tf.train.latest_checkpoint(FLAGS.checkpoint_path)
+      else:
+        checkpoint_path = FLAGS.checkpoint_path
 
+      # if os.path.isabs(checkpoint_path):
+        # Restores from checkpoint with absolute path.
+      saver.restore(sess, checkpoint_path)
+      # else:
+      #   Restores from checkpoint with relative path.
+        # saver.restore(sess, os.path.join(FLAGS.checkpoint_dir,
+        #                                  ))
 
+      # Start the queue runners.
+      coord = tf.train.Coordinator()
+      try:
+        threads = []
+        for qr in tf.get_collection(tf.GraphKeys.QUEUE_RUNNERS):
+          threads.extend(qr.create_threads(sess, coord=coord, daemon=True,
+                                           start=True))
 
-def _eval_once(saver, out_op, image_identity, saliency_identity, labels, priors, sess):
-  """Runs Eval once.
+        print('starting eval...')
 
-  Args:
-    saver: Saver.
-    summary_writer: Summary writer.
-    top_1_op: Top 1 op.
-    top_5_op: Top 5 op.
-    summary_op: Summary op.
-  """
+        while not coord.should_stop():
+            for feed_img_bytes, feed_index, feed_priors in feed_iterator():
 
-  if tf.gfile.IsDirectory(FLAGS.checkpoint_path):
-    checkpoint_path = tf.train.latest_checkpoint(FLAGS.checkpoint_path)
-  else:
-    checkpoint_path = FLAGS.checkpoint_path
+              out, img_label, img, priors_out, saliency = sess.run(
+                      [out_op, tf.identity(labels), image_identity, tf.identity(priors), saliency_identity], feed_dict={imgbytes: feed_img_bytes, indexes: feed_index, priors: feed_priors})
+              reconstructed = np.array(img, dtype=np.uint8)
 
-  # if os.path.isabs(checkpoint_path):
-    # Restores from checkpoint with absolute path.
-  saver.restore(sess, checkpoint_path)
-  # else:
-  #   Restores from checkpoint with relative path.
-    # saver.restore(sess, os.path.join(FLAGS.checkpoint_dir,
-    #                                  ))
+              saliency_img = np.array(saliency, dtype=np.uint8)
 
-  # Start the queue runners.
-  coord = tf.train.Coordinator()
-  try:
-    threads = []
-    for qr in tf.get_collection(tf.GraphKeys.QUEUE_RUNNERS):
-      threads.extend(qr.create_threads(sess, coord=coord, daemon=True,
-                                       start=True))
+              saliency_img = cv2.cvtColor(saliency_img, cv2.COLOR_RGB2BGR)
+              # grayscale = cv2.cvtColor(grayscale, cv2.COLOR_GRAY2RGB)
 
-    print('starting eval...')
+              reconstructed = cv2.cvtColor(reconstructed, cv2.COLOR_RGB2BGR)
 
-    while not coord.should_stop():
-      out, img_label, img, priors_out, saliency = sess.run(
-        [out_op, tf.identity(labels), image_identity, tf.identity(priors), saliency_identity])
-      reconstructed = np.array(img, dtype=np.uint8)
+              print("begin\n")
+              print(">" + ",".join(['%.5f' % float(num) for num in out[0]]) + "|" + str(int(img_label)) + "|" + str(
+                base64.standard_b64encode(bytes(cv2.imencode('.jpeg', reconstructed)[1])), 'utf-8') + "|" + str(priors_out,
+                                                                                                                'utf-8') + "|" + str(
+                base64.standard_b64encode(bytes(cv2.imencode('.jpeg', saliency_img)[1])), 'utf-8'))
+              print("\nend")
+              sys.stdout.flush()
 
-      saliency_img = np.array(saliency, dtype=np.uint8)
+      except Exception as e:  # pylint: disable=broad-except
+        coord.request_stop(e)
 
-      saliency_img = cv2.cvtColor(saliency_img, cv2.COLOR_RGB2BGR)
-      # grayscale = cv2.cvtColor(grayscale, cv2.COLOR_GRAY2RGB)
-
-      reconstructed = cv2.cvtColor(reconstructed, cv2.COLOR_RGB2BGR)
-
-      print("begin\n")
-      print(">" + ",".join(['%.5f' % float(num) for num in out[0]]) + "|" + str(int(img_label)) + "|" + str(
-        base64.standard_b64encode(bytes(cv2.imencode('.jpeg', reconstructed)[1])), 'utf-8') + "|" + str(priors_out,
-                                                                                                        'utf-8') + "|" + str(
-        base64.standard_b64encode(bytes(cv2.imencode('.jpeg', saliency_img)[1])), 'utf-8'))
-      print("\nend")
-      sys.stdout.flush()
-
-  except Exception as e:  # pylint: disable=broad-except
-    coord.request_stop(e)
-
-  coord.request_stop()
-  coord.join(threads, stop_grace_period_secs=10)
+      coord.request_stop()
+      coord.join(threads, stop_grace_period_secs=10)
 
 
 if __name__ == '__main__':
