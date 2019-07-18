@@ -21,10 +21,7 @@ import cv2
 import numpy as np
 import sys
 import tensorflow as tf
-
-from datasets import dataset_factory
-from nets import nets_factory
-from preprocessing import preprocessing_factory
+import os
 
 slim = tf.contrib.slim
 
@@ -83,6 +80,9 @@ tf.app.flags.DEFINE_integer(
 FLAGS = tf.app.flags.FLAGS
 
 
+from datasets import dataset_factory
+from nets import nets_factory
+from preprocessing import preprocessing_factory
 #----------------------------------------------
 
 def setup_queue(sess):
@@ -95,7 +95,7 @@ def setup_queue(sess):
     def runFeeder():
         with main_thread_graph.as_default():
             while True:
-                f = open('./classify_pipe.fifopipe', 'r')
+                f = open(os.path.expanduser('~/classify_pipe.fifopipe'), 'r')
                 lines = f.readlines()
                 entries = []
                 # Each read of the pipe may contain more than 1 image.
@@ -103,7 +103,7 @@ def setup_queue(sess):
                     # Here you parse whatever you have sent through the pipe.
                     # My admittingly horrible format is: image_bytes >>>DATA<<< image_index >>>EOF<<<
                     # Where image_bytes is the base64 encoded image, >>>DATA<<< and >>>EOF<<< are delimiters, and image_id is the image ID
-                    entries.extend([(base64.standard_b64decode(x[0]), int(x[1].split('|')[0])) for x in
+                    entries.extend([(base64.standard_b64decode(print(x[0]) or x[0]), int(x[1].split('|')[0])) for x in
                                [x.split('>>>DATA<<<') for x in line.split(">>>EOF<<<")[:-1]]])
 
                 for img, image_id in entries:
@@ -147,10 +147,11 @@ def setup_queue_with_priors(sess):
     def runFeeder():
         with main_thread_graph.as_default():
             while True:
-                f = open('/home/dm116/Workspace/MultiLevelSoftmax/pipe', 'r')
+                f = open(os.path.expanduser('~/classify_pipe.fifopipe'), 'r')
                 lines = f.readlines()
                 ls = []
                 for line in lines:
+                    print('lines lines lines')
                     ls.extend([(base64.standard_b64decode(x[0]), int(x[1].split('|')[0]), x[1].split('|')[1]) for x in
                                [x.split('>>>INDEX<<<') for x in line.split(">>>EOF<<<")[:-1]]])
 
@@ -163,13 +164,13 @@ def setup_queue_with_priors(sess):
                         sys.stderr.write('bad image passed\n')
                         continue
 
-                    if img_np == None:
+                    if img_np is None:
                         sys.stderr.write('bad image passed\n')
                         continue
 
                     conv_img_bytes = bytes(cv2.imencode('.jpeg', img_np)[1])
 
-                    # print('img recvd: ' + str(idx))
+                    print('img recvd: ' + str(idx))
                     # cv2.startWindowThread()
                     # cv2.namedWindow("preview")
                     # cv2.imshow("preview", img_np)
@@ -187,6 +188,7 @@ def setup_queue_with_priors(sess):
     threading.Thread(target=runFeeder).start()
 
     return queue
+
 def classify_input_single_with_priors(queue, preprocess_fn):
 
     img_bytes, image_id, priors = queue.dequeue()
@@ -219,7 +221,7 @@ def main(_):
     #------------------
 
     sess = tf.Session(graph=tf.get_default_graph())
-    queue = setup_queue(sess)
+    queue = setup_queue_with_priors(sess)
 
     #------------------
 
@@ -270,7 +272,7 @@ def main(_):
 
     #WITH THIS
     #------------------
-    img_bytes, image_id = queue.dequeue()
+    img_bytes, image_id, _ = queue.dequeue()
     num_channels = 3
 
     image = tf.image.decode_jpeg(img_bytes, channels=num_channels)# preprocess_fn(img_bytes, 0, False)

@@ -24,11 +24,6 @@ from tensorflow.python.ops import gen_nn_ops
 from tensorflow.python.framework import ops
 import numpy as np
 
-from datasets import dataset_factory
-from nets import nets_factory
-from preprocessing import preprocessing_factory
-
-from datasets import species_big
 
 slim = tf.contrib.slim
 
@@ -51,6 +46,11 @@ tf.app.flags.DEFINE_string(
     'dataset_dir', None, 'The directory where the dataset files are stored.')
 
 
+from datasets import dataset_factory
+from nets import nets_factory
+from preprocessing import preprocessing_factory
+
+from datasets import species_big
 import preprocessing.species_big_preprocessing as species_big_preprocessing
 
 tf.app.flags.DEFINE_float(
@@ -164,7 +164,7 @@ def setup_queue(sess):
   def runFeeder():
     with main_thread_graph.as_default():
       while True:
-        f = open('/home/jeff/Workspace/models/slim/classify_pipe.fifopipe', 'r')
+        f = open(os.path.expanduser('~/classify_pipe.fifopipe'), 'r')
         lines = f.readlines()
         ls = []
         for line in lines:
@@ -180,7 +180,7 @@ def setup_queue(sess):
             sys.stderr.write('bad image passed\n')
             continue
 
-          if img_np == None:
+          if img_np is None:
             sys.stderr.write('bad image passed\n')
             continue
 

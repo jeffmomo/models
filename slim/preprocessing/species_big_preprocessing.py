@@ -231,8 +231,8 @@ def preprocess_for_train(image, height, width, bbox,
 
     tf.image_summary('final_distorted_image' if is_main else 'final_distorted_image_side',
                      tf.expand_dims(distorted_image, 0))
-    distorted_image = tf.sub(distorted_image, 0.5)
-    distorted_image = tf.mul(distorted_image, 2.0)
+    distorted_image = distorted_image - 0.5
+    distorted_image = distorted_image * 2.0
     return distorted_image
 
 def preprocess_for_train_multi(image, height, width, bbox=None,
@@ -338,10 +338,10 @@ def preprocess_for_train_multi(image, height, width, bbox=None,
     tf.image_summary('final_distorted_image', tf.expand_dims(distorted_image, 0))
     tf.image_summary('final_distorted_image_central', tf.expand_dims(distorted_image_central, 0))
 
-    distorted_image = tf.sub(distorted_image, 0.5)
-    distorted_image = tf.mul(distorted_image, 2.0)
-    distorted_image_central = tf.sub(distorted_image_central, 0.5)
-    distorted_image_central = tf.mul(distorted_image_central, 2.0)
+    distorted_image = distorted_image - 0.5
+    distorted_image = distorted_image * 2.0
+    distorted_image_central = distorted_image_central - 0.5
+    distorted_image_central = distorted_image_central * 2.0
 
     return distorted_image, distorted_image_central
 
@@ -382,8 +382,8 @@ def preprocess_for_eval(image, height, width,
       image = tf.image.resize_bilinear(image, [height, width],
                                        align_corners=False)
       image = tf.squeeze(image, [0])
-    image = tf.sub(image, 0.5)
-    image = tf.mul(image, 2.0)
+    image = image - 0.5
+    image = image * 2.0
     return image
 
 
@@ -433,11 +433,11 @@ def preprocess_for_eval_multi(image, height, width,
                                             align_corners=False)
       image_central = tf.squeeze(image_central, [0])
 
-    image_main = tf.sub(image_main, 0.5)
-    image_main = tf.mul(image_main, 2.0)
+    image_main = image_main - 0.5
+    image_main = image_main * 2.0
 
-    image_central = tf.sub(image_central, 0.5)
-    image_central = tf.mul(image_central, 2.0)
+    image_central = image_central - 0.5
+    image_central = image_central * 2.0
 
     return image_main, image_central
 

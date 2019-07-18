@@ -27,7 +27,6 @@ import tensorflow as tf
 
 from datasets import dataset_utils
 
-from hierarchy import get_hierarchy
 
 slim = tf.contrib.slim
 
@@ -43,15 +42,12 @@ current_level = tf.app.flags.FLAGS.current_level
 native_indices = tf.app.flags.FLAGS.native_indices
 
 
-hierarchy_tree = get_hierarchy.generate_tree()
-hierarchy_tree.prune(threshold=5)
-hierarchy_tree.prune_by_names(get_hierarchy.get_20k_label_mappings())
+hierarchy_tree = None
 
 
 
-assert len(hierarchy_tree.children()) == _TOTAL_CLASSES, "Unexpected number of classes"
 
-def_lst, idx_map = hierarchy_tree.get_tree_index_mappings()
+def_lst, idx_map = (0, 0)
 
 
 class SpeciesDataset(object):
@@ -101,7 +97,7 @@ class SpeciesDataset(object):
   def __init__(self, level=_LEAF_DEPTH):
 
     self.level = level
-    self._NUM_CLASSES = len(def_lst[level])
+    self._NUM_CLASSES = _TOTAL_CLASSES
     self.translationmap_tensor = None
     self.labelmap_tensor = None
 
