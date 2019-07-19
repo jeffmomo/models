@@ -120,7 +120,7 @@ def main(_):
         with slim.arg_scope(arg_scope):
           return func(main, side, num_classes=(dataset.num_classes), is_training=False)
 
-      imgbytes, indexes, priors = tf.placeholder(tf.string), tf.placeholder(tf.int32), tf.placeholder(tf.string)
+      imgbytes, priors = tf.placeholder(tf.string), tf.placeholder(tf.string)
 
       image = tf.image.decode_jpeg(imgbytes, channels=3)
 
@@ -173,7 +173,6 @@ def main(_):
       image_identity = extract_rgb_image(images_side)
 
       out_op = tf.nn.softmax(logits)
-      labels = indexes
 
       if tf.gfile.IsDirectory(FLAGS.checkpoint_path):
         checkpoint_path = tf.train.latest_checkpoint(FLAGS.checkpoint_path)
@@ -192,12 +191,15 @@ def main(_):
       coord = tf.train.Coordinator()
       try:
         print('starting eval...')
+        from tensorflow import saved_model
+
+        #saved_model.simple_save(sess, './saved_model', {'image_bytes': imgbytes, 'priors': priors}, {'probabilities': out_op, 'saliency': saliency_identity})
 
         while not coord.should_stop():
             for feed_img_bytes, feed_index, feed_priors in feed_iterator():
 
-              out, img_label, img, priors_out, saliency = sess.run(
-                      [out_op, tf.identity(labels), image_identity, tf.identity(priors), saliency_identity], feed_dict={imgbytes: feed_img_bytes, indexes: feed_index, priors: feed_priors})
+              out, img, saliency = sess.run(
+                      [out_op, image_identity, saliency_identity], feed_dict={imgbytes: feed_img_bytes })
               reconstructed = np.array(img, dtype=np.uint8)
 
               saliency_img = np.array(saliency, dtype=np.uint8)
@@ -208,9 +210,8 @@ def main(_):
               reconstructed = cv2.cvtColor(reconstructed, cv2.COLOR_RGB2BGR)
 
               print("begin\n")
-              print(">" + ",".join(['%.5f' % float(num) for num in out[0]]) + "|" + str(int(img_label)) + "|" + str(
-                base64.standard_b64encode(bytes(cv2.imencode('.jpeg', reconstructed)[1])), 'utf-8') + "|" + str(priors_out,
-                                                                                                                'utf-8') + "|" + str(
+              print(">" + ",".join(['%.5f' % float(num) for num in out[0]]) + "|" + str(feed_index) + "|" + str(
+                base64.standard_b64encode(bytes(cv2.imencode('.jpeg', reconstructed)[1])), 'utf-8') + "|" + feed_priors + "|" + str(
                 base64.standard_b64encode(bytes(cv2.imencode('.jpeg', saliency_img)[1])), 'utf-8'))
               print("\nend")
               sys.stdout.flush()
